@@ -36,13 +36,13 @@ canvas.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
 .hint { margin-top: 28px; font: 500 0.85rem/1 var(--mono); color: var(--muted); letter-spacing: 0.1em; }
 .hint::after { content: ""; display: block; width: 1px; height: 40px; margin: 14px auto 0; background: linear-gradient(var(--muted), transparent); animation: drip 1.8s ease-in-out infinite; }
 @keyframes drip { 0% { transform: scaleY(0); transform-origin: top; } 50% { transform: scaleY(1); transform-origin: top; } 51% { transform-origin: bottom; } 100% { transform: scaleY(0); transform-origin: bottom; } }
-.photo { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; background: #000; image-rendering: pixelated; }
-#flash { position: fixed; inset: 0; background: #fff; opacity: 0; }
-#fade { position: fixed; inset: 0; background: #000; opacity: 0; }
-#timer { position: fixed; right: max(24px, env(safe-area-inset-right, 0px) + 24px); top: calc(9vh + env(safe-area-inset-top, 0px)); font: 700 clamp(2rem, 6vw, 4.5rem)/1 var(--mono); opacity: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.photo { pointer-events: none; position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; background: #000; image-rendering: pixelated; }
+#flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+#timer { pointer-events: none; position: fixed; right: max(24px, env(safe-area-inset-right, 0px) + 24px); top: calc(9vh + env(safe-area-inset-top, 0px)); font: 700 clamp(2rem, 6vw, 4.5rem)/1 var(--mono); opacity: 0; font-variant-numeric: tabular-nums; text-align: right; }
 #timer small { display: block; font: 500 0.8rem/1 var(--mono); color: #ff6b5b; letter-spacing: 0.14em; margin-bottom: 10px; }
 #timer small::before { content: "●"; margin-right: 6px; }
-#numbers { position: fixed; left: 50%; top: 56%; translate: -50% -50%; opacity: 0; font: 500 clamp(9px, 1.15vw, 15px)/1.6 var(--mono); display: grid; grid-template-columns: repeat(16, auto); gap: 0 0.9em; font-variant-numeric: tabular-nums; }
+#numbers { pointer-events: none; position: fixed; left: 50%; top: 56%; translate: -50% -50%; opacity: 0; font: 500 clamp(9px, 1.15vw, 15px)/1.6 var(--mono); display: grid; grid-template-columns: repeat(16, auto); gap: 0 0.9em; font-variant-numeric: tabular-nums; }
 #numbers span { opacity: 0; transition: opacity 0.25s; text-align: right; }
 #numbers span.on { opacity: 1; }
 #numbers .r { color: #ff7b6b; } #numbers .g { color: #7ee08f; } #numbers .b { color: #7fa8ff; }
