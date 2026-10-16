@@ -339,10 +339,10 @@ part(solidParts, new THREE.BoxGeometry(110, QUAY, 3), 0x3a3d45, 0, QUAY / 2, FRO
 part(solidParts, new THREE.BoxGeometry(110, 0.1, 2.5), 0x24262c, 0, QUAY, FRONT + 1.25);
 houses.forEach((hs) => {
   const { x, w, h, base, kind, gh } = hs;
-  part(solidParts, new THREE.BoxGeometry(w, h, 6), base, x + w / 2, QUAY + h / 2, FRONT - 3.01);
+  part(solidParts, new THREE.BoxGeometry(w, h, 6), base, x + w / 2, QUAY + h / 2, FRONT - 3.25);
   const fr = new THREE.PlaneGeometry(w, h), uv = fr.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, (hs.ax + uv.getX(i) * hs.cw) / AW, 1 - (hs.ch * (1 - uv.getY(i))) / AH);
-  part(frontParts, fr, 0xffffff, x + w / 2, QUAY + h / 2, FRONT + 0.005);
+  part(frontParts, fr, 0xffffff, x + w / 2, QUAY + h / 2, FRONT + 0.02);
   const s = new THREE.Shape();
   if (kind === 0) { s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(0, gh); }
   else if (kind === 1) { const st = 3; s.moveTo(-w / 2, 0); for (let i = 0; i < st; i++) { const xx = -w / 2 + (i * w) / (2 * st), yy = (gh * (i + 1)) / st; s.lineTo(xx, yy); s.lineTo(xx + w / (2 * st), yy); } for (let i = st - 1; i >= 0; i--) { const xx = w / 2 - (i * w) / (2 * st) - w / (2 * st), yy = (gh * (i + 1)) / st; s.lineTo(xx, yy); s.lineTo(xx + w / (2 * st), yy); } s.lineTo(w / 2, 0); }
@@ -888,6 +888,8 @@ function draw(now, fixed) {
     renderer.toneMappingExposure = lerp(glimmer, 1.15, ease(seg(p, 0.012, 0.085)));
     const [pos, tgt] = pathAt(WORLD_KEYS, p);
     if (view.aspect < 1 && p > 0.15) pos.sub(tgt).multiplyScalar(lerp(lerp(1.45, 1.1, clamp01(view.aspect)), 1, seg(p, 0.36, 0.385))).add(tgt);
+    const near = p < 0.37 ? 0.1 : 0.004;
+    if (view.near !== near) { view.near = near; view.updateProjectionMatrix(); }
     view.position.copy(pos); view.lookAt(tgt);
     const press = seg(p, 0.245, 0.252) - seg(p, 0.282, 0.288);
     button.position.y = 0.002 - 0.0018 * press; finger.position.y = (finger.userData.y ??= finger.position.y) - 0.0018 * press;
@@ -907,6 +909,7 @@ function draw(now, fixed) {
     renderer.toneMappingExposure = 1.0;
     const [pos, tgt] = pathAt(LAB_KEYS, p);
     if (view.aspect < 1) pos.sub(tgt).multiplyScalar(lerp(1.5, 1.15, clamp01(view.aspect))).add(tgt);
+    if (view.near !== 0.05) { view.near = 0.05; view.updateProjectionMatrix(); }
     view.position.copy(pos); view.lookAt(tgt);
     chip.rotation.y = lerp(-0.5, 0, ease(seg(p, 0.44, 0.55)));
     dieMat2.opacity = seg(p, 0.52, 0.565);
