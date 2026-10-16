@@ -809,21 +809,27 @@ cmp.addEventListener("pointerdown", hold(true)); ["pointerup", "pointerleave", "
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
 const renderPass = new RenderPass(world, view);
 const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.42, 0.3, 0.9);
-{ const set = bloom.setSize.bind(bloom); bloom.setSize = (w, h) => set(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2))); }   // bloom at half resolution
 composer.addPass(renderPass); composer.addPass(bloom); composer.addPass(new OutputPass());
 
 // 3D is drawn within a pixel budget (a 5K screen would otherwise mean ~15 MP per frame);
 // `quality` drops further when frames run slow. Text is HTML and stays sharp regardless.
 const BUDGET = 4.5e6;
 let quality = 1;
+// Resizing a canvas clears it, so only touch sizes when they really change.
+let sized = "";
 function resize() {
   const w = innerWidth, h = innerHeight, dpr = Math.min(devicePixelRatio, 2);
-  const pr = Math.max(0.5, Math.min(dpr, Math.sqrt(BUDGET / (w * h)) * quality));
-  renderer.setPixelRatio(pr); composer.setPixelRatio(pr);
-  renderer.setSize(w, h, false); composer.setSize(w, h);
-  needsDraw = true;
+  const pr = Math.max(0.5, Math.min(dpr, Math.sqrt(BUDGET / (w * h))) * quality);
+  const key = `${w}x${h}@${pr.toFixed(3)}`;
+  if (key !== sized) {
+    sized = key;
+    renderer.setPixelRatio(pr); composer.setPixelRatio(pr);
+    renderer.setSize(w, h, false); composer.setSize(w, h);
+  }
   view.aspect = w / h; view.fov = w / h < 0.8 ? 68 : w / h < 1.2 ? 55 : 42; view.updateProjectionMatrix();
-  drCanvas.width = Math.round(w * dpr); drCanvas.height = Math.round(h * dpr);
+  const dw = Math.round(w * dpr), dh = Math.round(h * dpr);
+  if (drCanvas.width !== dw || drCanvas.height !== dh) { drCanvas.width = dw; drCanvas.height = dh; }
+  needsDraw = true;
 }
 addEventListener("resize", resize); resize();
 
@@ -853,10 +859,9 @@ function frame(now) {
   draw(now);
   if (lastT && cur < 0.86) {                // adapt 3D resolution to the measured frame time
     ema = ema * 0.9 + (now - lastT) * 0.1;
-    if (now - lastAdjust > 1500) {
-      // frame interval: below ~18 ms we are holding 60 fps and can afford more pixels (sharper on fast GPUs)
-      if (ema > 26 && quality > 0.55) { quality *= 0.85; resize(); lastAdjust = now; }
-      else if (ema < 18 && quality < 1.6) { quality = Math.min(1.6, quality * 1.1); resize(); lastAdjust = now; }
+    // only ever step down, and only when clearly too slow; stepping back up made it oscillate (and flicker)
+    if (now - lastAdjust > 2500 && ema > 30 && quality > 0.6) {
+      quality *= 0.85; lastAdjust = now; resize(); draw(now);   // redraw at once so the cleared canvas never shows
     }
   }
   lastT = now;
