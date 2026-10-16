@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>一张照片的诞生</title>
-<meta name="description" content="从阿姆斯特丹运河边按下快门，到 CMOS、拜耳阵列、ADC 读出，再到黑电平、白电平、白平衡、色彩矩阵、色调曲线、创意外观和 JPEG：跟着光走一遍 Sony α7 V 里的一张照片是怎么产生的。">
+<meta name="description" content="从阿姆斯特丹运河边按下快门，到 CMOS、拜耳阵列、ADC 读出，再到黑电平、白电平、白平衡、色彩矩阵、色调曲线、YCbCr 和创意外观：跟着光走一遍 Sony α7 V 里的一张照片是怎么产生的。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
 <style>
@@ -18,8 +18,8 @@
 html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); }
 body { overscroll-behavior-y: none; }
 canvas.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-#dr { opacity: 0; cursor: crosshair; }
-#track { height: 3900vh; }
+#dr { opacity: 0; }
+#track { height: 3800vh; }
 .overlay { position: fixed; inset: 0; pointer-events: none; }
 .cap {
   position: fixed; left: max(24px, env(safe-area-inset-left, 0px) + 24px); right: 24px;
@@ -65,21 +65,29 @@ canvas.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
 .panel button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .looks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .looks button { padding: 8px 4px; font-family: var(--mono); font-weight: 700; }
-#wbsec[hidden], #looksec[hidden], #trsec[hidden] { display: none; }
+#looksec[hidden], #trsec[hidden] { display: none; }
 .trace { display: grid; grid-template-columns: auto 16px 1fr; gap: 5px 8px; align-items: center; font: 500 0.74rem/1.25 var(--mono); font-variant-numeric: tabular-nums; }
 .trace .l { color: var(--muted); font-family: var(--sans); font-size: 0.76rem; white-space: nowrap; }
 .trace .s { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,.2); }
 .trace .v { color: #d6d6db; text-align: right; white-space: nowrap; }
 .trace .off { opacity: 0.28; }
 .trace .now { color: var(--fg); }
-#curve, #matcard { position: fixed; left: max(24px, env(safe-area-inset-left, 0px) + 24px); bottom: calc(6vh + env(safe-area-inset-bottom, 0px)); opacity: 0; pointer-events: none; }
-#curve { width: min(420px, calc(100% - 48px)); height: 260px; }
-#matcard { background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 16px 18px; font: 500 clamp(0.8rem, 1.2vw, 1rem)/1.7 var(--mono); font-variant-numeric: tabular-nums; color: #d6d6db; }
-#matcard .m { display: grid; grid-template-columns: auto auto repeat(3, auto); gap: 2px 16px; align-items: center; }
-#matcard .r { color: #ff7b6b; } #matcard .g { color: #7ee08f; } #matcard .b { color: #7fa8ff; }
-#matcard .k { text-align: right; } #matcard small { display: block; margin-top: 8px; color: var(--muted); font-family: var(--sans); }
+.card { position: fixed; right: max(24px, env(safe-area-inset-right, 0px) + 24px); top: calc(8vh + env(safe-area-inset-top, 0px)); width: min(400px, calc(100% - 48px)); opacity: 0; pointer-events: none;
+  background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 16px 18px; font: 500 0.82rem/1.5 var(--sans); color: #c9c9ce; }
+.card h4 { margin: 0 0 10px; font: 700 0.74rem/1 var(--mono); letter-spacing: 0.1em; color: var(--muted); }
+.card svg { display: block; width: 100%; height: auto; }
+.card .pair { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; margin-top: 12px; }
+.card .pair > div { display: grid; gap: 6px; justify-items: center; font: 500 0.78rem/1.3 var(--mono); text-align: center; }
+.card .pair i { display: block; width: 100%; height: 44px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); }
+.card .pair span.l { font-family: var(--sans); color: var(--muted); }
+.card small { display: block; margin-top: 10px; color: var(--muted); }
+.strip { display: grid; grid-template-columns: 74px repeat(8, 1fr); gap: 4px; align-items: center; margin-top: 6px; }
+.strip i { display: block; height: 30px; border-radius: 4px; }
+.strip span { font-size: 0.74rem; color: var(--muted); }
+.strip.axis span { font: 500 0.66rem/1 var(--mono); text-align: center; }
+#ycclab div { position: fixed; translate: -50% 0; text-align: center; opacity: 0; pointer-events: none; font: 700 clamp(0.9rem, 1.4vw, 1.2rem)/1.3 var(--sans); }
+#ycclab small { display: block; font-weight: 500; font-size: 0.8em; color: var(--muted); }
 #tracemark { position: fixed; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; border: 2px solid var(--warm); box-shadow: 0 0 0 2px rgba(0,0,0,.6); pointer-events: none; opacity: 0; }
-#pickmark { position: fixed; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.5); pointer-events: none; opacity: 0; transition: opacity .3s; }
 @media (max-width: 700px) {
   .cap { bottom: calc(7vh + env(safe-area-inset-bottom, 0px)); }
   .cap.top { top: calc(6vh + env(safe-area-inset-top, 0px)); }
@@ -87,7 +95,7 @@ canvas.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
   #numbers span.wide { display: none; }
   .panel { left: 16px; right: 16px; width: auto; padding: 12px; gap: 10px; }
   #hist { height: 110px; bottom: calc(4vh + env(safe-area-inset-bottom, 0px)); }
-  #curve, #matcard { display: none; }
+  .card { display: none; }
   .panel.end #trsec { display: none; }
 }
 </style>
@@ -100,20 +108,20 @@ canvas.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
 </head>
 <body>
 <canvas id="gl" class="stage" aria-hidden="true"></canvas>
-<canvas id="dr" class="stage" aria-label="交互暗房：点击画面选择白平衡参考点"></canvas>
+<canvas id="dr" class="stage" aria-label="暗房：照片一步步显影"></canvas>
 <div id="track"></div>
 
 <img class="photo" id="img-bayer" src="assets/raw_bayer.png" alt="RAW 马赛克的 1:1 局部">
 <img class="photo" id="img-demosaic" src="assets/demosaic.png" alt="同一局部去马赛克之后">
 <div id="numbers" aria-label="RAW 读数"></div>
 <canvas id="hist" aria-label="绿色通道直方图"></canvas>
-<canvas id="curve" aria-label="色调曲线"></canvas>
-<div id="matcard" aria-label="色彩矩阵"></div>
+<div id="matcard" class="card" aria-label="色彩矩阵示意"></div>
+<div id="tonecard" class="card" aria-label="色调曲线示意"></div>
+<div id="ycclab"><div></div><div></div><div></div></div>
 <div id="tracemark"></div>
 <div id="timer"><small>曝光中</small><span id="timerv">0.0</span> s</div>
 <div id="flash"></div>
 <div id="fade"></div>
-<div id="pickmark"></div>
 
 <div class="overlay">
   <section class="cap center" data-in="-1" data-out="0.05">
@@ -186,49 +194,35 @@ canvas.stage { position: fixed; inset: 0; width: 100%; height: 100%; display: bl
   <section class="cap top" data-in="1.17" data-out="1.285">
     <span class="eyebrow">第 3 步 · 白平衡</span>
     <h2>把灰色变回灰色</h2>
-    <p>绿色感光点最灵敏，所以画面偏绿。相机记下的增益是红 <b>×1.85</b>、蓝 <b>×2.00</b>。<b>点一下画面里本该是白色或灰色的地方</b>，按它重新算。</p>
+    <p>绿色感光点最灵敏，所以画面偏绿。拍摄时相机记下了一组增益：红 <b>×1.85</b>、蓝 <b>×2.00</b>，把本该是灰色的东西拉回灰色。</p>
   </section>
   <section class="cap top" data-in="1.295" data-out="1.39">
     <span class="eyebrow">第 4 步 · 色彩矩阵</span>
-    <h2>相机的 RGB，不是屏幕的 RGB</h2>
-    <p>传感器上的红绿蓝滤色片，和屏幕的三原色不是同一种颜色，要乘一组系数换算过来。索尼不只用一个 3×3 矩阵，而是按色相分成 <b>1024</b> 档，每档一组。右下角在<b>跟踪一个像素</b>，移动鼠标可以换一个。</p>
+    <h2>相机的颜色会"串"</h2>
+    <p>红、绿、蓝三种滤色片的感光范围是互相重叠的：一束蓝光照进来，红、绿像素也有读数，所以原始的颜色发灰、不纯。色彩矩阵是一组系数，把每个通道里<b>串进来的别的颜色减掉</b>。看左下角那盏蓝灯的倒影。</p>
   </section>
   <section class="cap top" data-in="1.40" data-out="1.495">
     <span class="eyebrow">第 5 步 · 色调曲线</span>
-    <h2>把光量，换成眼睛觉得对的亮度</h2>
-    <p>读数和光量成正比，可人眼对暗部敏感得多。前面几步只套了标准的 sRGB 编码来显示；索尼的曲线更进一步，把 <b>18% 的中灰提到七成亮</b>，暗部打开，高光柔和地收到顶。</p>
+    <h2>亮度，要按眼睛来分</h2>
+    <p>光每少一半，人眼只觉得暗了一级。按光量直接显示，暗的几档全挤在黑里。色调曲线把每一档拉开成差不多的台阶，<b>中灰提到七成亮</b>。（前面几步为了看得清，已经先套了一条标准曲线。）</p>
   </section>
-  <section class="cap top" data-in="1.505" data-out="1.60">
-    <span class="eyebrow">第 6 步 · 亮度和色彩分开调</span>
-    <h2>拆成 Y、Cb、Cr</h2>
-    <p>Y 是亮度，Cb、Cr 是颜色。颜色按色相加饱和度；太亮和太暗的地方把颜色收一收，灯泡才不会发出怪色；亮度再过一条带拐点的曲线。（相机里锐化和降噪也在这一段，这里没有展示。）</p>
+  <section class="cap top" data-in="1.505" data-out="1.63">
+    <span class="eyebrow">第 6 步 · 亮度和颜色分开调</span>
+    <h2>拆成三张，分别调</h2>
+    <p>Y 是亮度，Cb 是蓝↔黄，Cr 是红↔青。颜色两张<b>加大饱和度</b>，最亮的地方把颜色收一收；亮度那张过一条曲线。调完再合回一张。</p>
   </section>
-  <section class="cap top" data-in="1.61" data-out="1.72">
+  <section class="cap top" data-in="1.645" data-out="1.75">
     <span class="eyebrow">第 7 步 · 创意外观</span>
     <h2>同样的步骤，换一套参数</h2>
     <p>矩阵、曲线、饱和度、亮度曲线，每种创意外观都有自己的一套，ST 只是其中之一。网页里把第 4 到第 6 步打包成一张三维查找表来算。在面板里换一个外观试试。</p>
   </section>
-  <section class="cap top" data-in="1.73" data-out="1.82">
-    <span class="eyebrow">第 8 步 · 写成 JPEG</span>
-    <h2>16384 级，压成 256 级</h2>
-    <p>每个通道从 14 位降到 8 位，再做 JPEG 压缩，标上 sRGB 色彩空间。右下角最后一行，就是这个像素在 JPEG 里的数值。</p>
-  </section>
-  <section class="cap top end" data-in="1.84" data-out="9">
+  <section class="cap top end" data-in="1.77" data-out="9">
     <h2>这就是你的照片</h2>
-    <p>白平衡和外观都可以继续改。查找表由 <a href="https://github.com/751K/sony-a7m5-looks" target="_blank" rel="noopener">sony-a7m5-looks</a> 的复刻代码生成，与 Imaging Edge 的结果基本一致。</p>
+    <p>外观可以继续换，移动鼠标可以追踪别的像素。查找表由 <a href="https://github.com/751K/sony-a7m5-looks" target="_blank" rel="noopener">sony-a7m5-looks</a> 的复刻代码生成，与 Imaging Edge 的结果基本一致。</p>
   </section>
 </div>
 
 <div class="panel" id="panel" aria-label="暗房控制">
-  <div id="wbsec">
-    <h3>白平衡</h3>
-    <div class="row">
-      <div class="sw" id="wbsw"></div>
-      <div class="gains" id="wbgains"></div>
-    </div>
-    <div class="tip" id="wbtip">点击画面中本该是中性灰或白色的地方。</div>
-    <div class="row" style="margin-top:8px"><button type="button" id="wbreset">用相机记录的白平衡</button></div>
-  </div>
   <div id="trsec" hidden>
     <h3>跟踪一个像素</h3>
     <div class="trace" id="trace"></div>
@@ -255,7 +249,7 @@ import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometr
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 
 const [RAW, DR, ST] = await Promise.all(["assets/raw.json", "assets/darkroom.json", "assets/stages.json"].map((u) => fetch(u).then((r) => r.json())));
-const P_MAX = 1.95;   // story units; the 3D part ends at 0.9
+const P_MAX = 1.9;   // story units; the 3D part ends at 0.9
 let needsDraw = true;  // render on demand: set whenever something visible changes
 
 /* ---------- helpers ---------- */
@@ -1223,7 +1217,7 @@ const gl = drCanvas.getContext("webgl2", { antialias: false, preserveDrawingBuff
 const rawImg = new Image(); await new Promise((ok, bad) => { rawImg.onload = ok; rawImg.onerror = bad; rawImg.src = "assets/raw.webp"; });
 const rawPx = (() => { const c = document.createElement("canvas"); c.width = DR.w; c.height = DR.h; const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(rawImg, 0, 0); return x.getImageData(0, 0, DR.w, DR.h).data; })();
 const decRaw = (e) => DR.enc_black + (e / 255) ** 2 * DR.enc_range;   // stored as sqrt((raw - 500) / 15883)
-const dr = { black: 0, white: 0, wbMix: 0, gain: [...DR.wb], mat: 0, tone: 0, refine: 0, look: 0, zebra: 0, lookName: "ST", hold: false };
+const dr = { black: 0, white: 0, wbMix: 0, gain: [...DR.wb], mat: 0, tone: 0, refine: 0, look: 0, split: 0, zebra: 0, lookName: "ST", hold: false };
 const lutCache = {};
 let prog, uni = {}, lutTex;
 if (gl) {
@@ -1232,32 +1226,45 @@ if (gl) {
   const fs = `#version 300 es
   precision highp float; precision highp sampler3D;
   uniform sampler2D raw; uniform sampler3D lut, lutMat, lutTone, lutSt; uniform vec2 res, img;
-  uniform float black, white, wbMix, mat, tone, refine, look, zebra, clipLin, encB, encR;
+  uniform float black, white, wbMix, mat, tone, refine, look, split, zebra, clipLin, encB, encR;
   uniform vec3 gain;
   out vec4 o;
   vec3 srgb(vec3 v){ v = clamp(v, 0., 1.); return mix(12.92 * v, 1.055 * pow(v, vec3(1./2.4)) - 0.055, step(0.0031308, v)); }
-  void main(){
-    vec2 s = gl_FragCoord.xy / res;
-    float ra = res.x / res.y, ia = img.x / img.y;
-    vec2 uv = ra > ia ? vec2(s.x, 0.5 + (s.y - 0.5) * ia / ra) : vec2(0.5 + (s.x - 0.5) * ra / ia, s.y);
-    uv.y = 1. - uv.y;
-    vec3 e = texture(raw, uv).rgb; vec3 r = encB + e * e * encR;
+  // one pixel through the steps; x is where it sits along the wipe, w the width in pixels of the image it belongs to
+  vec3 develop(vec2 uv, float x, float w, out float edge, out vec3 r) {
+    vec3 e = texture(raw, uv).rgb; r = encB + e * e * encR;
     vec3 n = (r - 512. * black) / mix(16383., 15871., white);
     n *= mix(vec3(1.), gain, wbMix);
-    vec3 base = srgb(n);
-    vec3 u = sqrt(clamp(n * clipLin / 16383., 0., 1.));
-    vec3 q = (u.bgr * 32. + 0.5) / 33.;
+    vec3 col = srgb(n);
+    vec3 u = sqrt(clamp(n * clipLin / 16383., 0., 1.)), q = (u.bgr * 32. + 0.5) / 33.;
     // each later step wipes in from the left, so the difference shows along a moving edge
-    float x = s.x, edge = 0.;
-    vec3 col = base;
     float f[3] = float[3](mat, tone, refine);
     vec3 nxt[3] = vec3[3](texture(lutMat, q).rgb, texture(lutTone, q).rgb, texture(lutSt, q).rgb);
+    edge = 0.;
     for (int i = 0; i < 3; i++) {
-      float e = f[i] * 1.04 - 0.02, w = 1. - smoothstep(e - 0.002, e, x);
-      col = mix(col, nxt[i], w);
-      if (f[i] > 0. && f[i] < 1.) edge = max(edge, 1. - smoothstep(0., 1.5, abs(x - e) * res.x));
+      float a = f[i] * 1.04 - 0.02, k = 1. - smoothstep(a - 0.002, a, x);
+      col = mix(col, nxt[i], k);
+      if (f[i] > 0. && f[i] < 1.) edge = max(edge, 1. - smoothstep(0., 1.5, abs(x - a) * w));
     }
-    col = mix(col, texture(lut, q).rgb, look);
+    return mix(col, texture(lut, q).rgb, look);
+  }
+  void main(){
+    vec2 P = gl_FragCoord.xy, s = P / res;
+    // the image's rectangle: full-screen "cover", or one of three tiles when split into Y / Cb / Cr
+    float sc = max(res.x / img.x, res.y / img.y); vec2 sz0 = img * sc, o0 = (res - sz0) * 0.5;
+    float gap = res.x * 0.015, tw = (res.x - 4. * gap) / 3., th = tw * img.y / img.x;
+    vec3 col = vec3(0.); float edge = 0.; vec3 r = vec3(0.);
+    for (int i = 0; i < 3; i++) {
+      vec2 sz = mix(sz0, vec2(tw, th), split), org = mix(o0, vec2(gap + float(i) * (tw + gap), (res.y - th) * 0.32), split);
+      vec2 uv = (P - org) / sz;
+      if (uv.x < 0. || uv.y < 0. || uv.x > 1. || uv.y > 1.) continue;
+      float e;
+      vec3 c = develop(vec2(uv.x, 1. - uv.y), split > 0. ? uv.x : s.x, split > 0. ? sz.x : res.x, e, r);
+      // Y as grey; Cb and Cr each shown on a mid grey, chroma doubled so it reads on screen
+      float Y = dot(c, vec3(.299, .587, .114)), cb = (c.b - Y) * .564 * 2., cr = (c.r - Y) * .713 * 2.;
+      vec3 ch = i == 0 ? vec3(Y) : i == 1 ? vec3(.5, .5 - .344 * cb, .5 + 1.773 * cb) : vec3(.5 + 1.403 * cr, .5 - .714 * cr, .5);
+      col = mix(c, clamp(ch, 0., 1.), split); edge = e;
+    }
     col = mix(col, vec3(1.), edge * 0.85);
     float hot = step(16383. * 0.985, max(r.r, max(r.g, r.b)));
     float stripe = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 14.));
@@ -1269,7 +1276,7 @@ if (gl) {
   gl.useProgram(prog);
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   const loc = gl.getAttribLocation(prog, "p"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  ["raw", "lut", "lutMat", "lutTone", "lutSt", "res", "img", "black", "white", "wbMix", "mat", "tone", "refine", "look", "zebra", "clipLin", "gain", "encB", "encR"].forEach((n) => (uni[n] = gl.getUniformLocation(prog, n)));
+  ["raw", "lut", "lutMat", "lutTone", "lutSt", "res", "img", "black", "white", "wbMix", "mat", "tone", "refine", "look", "split", "zebra", "clipLin", "gain", "encB", "encR"].forEach((n) => (uni[n] = gl.getUniformLocation(prog, n)));
   const rt = gl.createTexture(); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, rt);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, rawImg);
@@ -1305,7 +1312,7 @@ function drawDarkroom() {
   gl.uniform1f(uni.black, dr.black); gl.uniform1f(uni.white, dr.white); gl.uniform1f(uni.wbMix, dr.wbMix);
   const k = dr.hold ? 0 : 1;
   gl.uniform1f(uni.mat, dr.mat * k); gl.uniform1f(uni.tone, dr.tone * k); gl.uniform1f(uni.refine, dr.refine * k);
-  gl.uniform1f(uni.look, dr.look * k); gl.uniform1f(uni.zebra, dr.zebra); gl.uniform3fv(uni.gain, dr.gain);
+  gl.uniform1f(uni.look, dr.look * k); gl.uniform1f(uni.split, dr.split); gl.uniform1f(uni.zebra, dr.zebra); gl.uniform3fv(uni.gain, dr.gain);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 // screen <-> image coordinates (the same "cover" mapping as the shader)
@@ -1329,7 +1336,6 @@ function pixelAtUV(u, v) {
   }
   return s.map((v) => v / n);
 }
-const imgPixelAt = (cx, cy) => pixelAtUV(...screenToUV(cx, cy));
 // histogram of the green channel
 const histC = document.getElementById("hist"), hg = histC.getContext("2d");
 const HB = 512, hist = new Float32Array(HB);
@@ -1353,30 +1359,7 @@ function drawHist() {
   if (dr.black < 0.5) mark(0, "0", "rgba(255,255,255,.5)");
 }
 // controls
-const panel = document.getElementById("panel"), wbsec = document.getElementById("wbsec"), looksec = document.getElementById("looksec");
-const wbsw = document.getElementById("wbsw"), wbgains = document.getElementById("wbgains"), wbtip = document.getElementById("wbtip"), pickmark = document.getElementById("pickmark");
-const showGains = () => { wbgains.innerHTML = `红 ×${dr.gain[0].toFixed(2)}　绿 ×1.00　蓝 ×${dr.gain[2].toFixed(2)}`; };
-showGains(); wbsw.style.background = "#9a9a9a";
-let wbAnim = null, picking = false;
-function animateGain(to) {
-  const from = [...dr.gain], t0 = performance.now();
-  cancelAnimationFrame(wbAnim);
-  const step = (now) => { const k = ease(clamp01((now - t0) / 500)); dr.gain = from.map((v, i) => lerp(v, to[i], k)); showGains(); needsDraw = true; if (k < 1) wbAnim = requestAnimationFrame(step); };
-  wbAnim = requestAnimationFrame(step);
-}
-drCanvas.addEventListener("click", (e) => {
-  if (!picking) return;
-  const [r, g, b] = imgPixelAt(e.clientX, e.clientY).map((v) => Math.max(1, v - 512));
-  if (Math.max(r, g, b) + 512 > 16000) { wbtip.textContent = "这里已经过曝，换一个不那么亮的地方。"; return; }
-  if (g < 30) { wbtip.textContent = "这里太暗了，噪声会让结果不准，换一个亮一点的地方。"; return; }
-  const to = [g / r, 1, g / b];
-  const sw = [r, g, b].map((v) => Math.round(255 * Math.min(1, Math.sqrt(v / Math.max(r, g, b)))));
-  wbsw.style.background = `rgb(${sw.join(",")})`;
-  wbtip.textContent = "左边是你点的地方的原始颜色。灰色本该三个通道相等，所以按它算出增益。";
-  pickmark.style.left = e.clientX + "px"; pickmark.style.top = e.clientY + "px"; pickmark.style.opacity = 1;
-  animateGain(to);
-});
-document.getElementById("wbreset").onclick = () => { animateGain([...DR.wb]); wbsw.style.background = "#9a9a9a"; pickmark.style.opacity = 0; wbtip.textContent = "点击画面中本该是中性灰或白色的地方。"; };
+const panel = document.getElementById("panel"), looksec = document.getElementById("looksec");
 const LOOK_LABEL = { ST: "ST", Portrait: "PT", Neutral: "NT", Vivid: "VV", VV2: "VV2", FL: "FL", FL2: "FL2", FL3: "FL3", IN: "IN", SH: "SH", BW: "BW", Sepia: "SE" };
 const LOOK_ORDER = ["ST", "PT", "NT", "VV", "VV2", "FL", "FL2", "FL3", "IN", "SH", "BW", "SE"];
 const byLabel = Object.fromEntries(Object.entries(LOOK_LABEL).map(([k, v]) => [v, k]));
@@ -1403,13 +1386,14 @@ function lutSample(bytes, n) {
 }
 const enc1 = (v) => { v = Math.min(1, Math.max(0, v)); return v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055; };
 const dec1 = (e) => (e <= 0.04045 ? e / 12.92 : ((e + 0.055) / 1.055) ** 2.4);
-const TRACE = [["RAW 读数", 0], ["减黑电平、归一", 1.0], ["白平衡", 1.17], ["色彩矩阵", 1.295], ["色调曲线", 1.40], ["亮度/色彩", 1.505], ["外观", 1.61], ["JPEG 8 位", 1.73]];
+const TRACE = [["RAW 读数", 0], ["减黑电平、归一", 1.0], ["白平衡", 1.17], ["色彩矩阵", 1.295], ["色调曲线", 1.40], ["亮度/色彩", 1.505], ["外观", 1.645]];
 const traceEl = document.getElementById("trace"), trsec = document.getElementById("trsec"), tracemark = document.getElementById("tracemark");
 const traceCells = TRACE.map(([label]) => {
   const l = document.createElement("span"), sw = document.createElement("span"), v = document.createElement("span");
   l.className = "l"; l.textContent = label; sw.className = "s"; v.className = "v"; traceEl.append(l, sw, v); return [l, sw, v];
 });
-let traceUV = [0.72, 0.66];   // starts on the orange boat
+const LAMP = [0.15, 0.757];   // the blue lamp's reflection, where the colour matrix shows best
+let traceUV = [...LAMP];
 function updateTrace(p) {
   const raw = pixelAtUV(...traceUV), n = raw.map((v) => (v - 512) / 15871);
   const wb = n.map((v, c) => v * lerp(1, dr.gain[c], dr.wbMix));
@@ -1417,7 +1401,7 @@ function updateTrace(p) {
   const f3 = (a) => a.map((v) => v.toFixed(3)).join(" "), i3 = (a, w = 3) => a.map((v) => String(Math.round(v)).padStart(w, " ")).join(" ");
   const sw8 = (a) => `rgb(${a.map((v) => Math.round(Math.min(255, Math.max(0, v)))).join(",")})`, swLin = (a) => sw8(a.map((v) => enc1(v) * 255));
   const rows = [[i3(raw, 5), swLin(raw.map((v) => v / 16383))], [f3(n), swLin(n)], [f3(wb), swLin(wb)], [f3(mat8.map((e) => dec1(e / 255))), sw8(mat8)],
-    [i3(tone8), sw8(tone8)], [i3(st8), sw8(st8)], [i3(look8), sw8(look8)], [i3(look8.map(Math.round)), sw8(look8)]];
+    [i3(tone8), sw8(tone8)], [i3(st8), sw8(st8)], [i3(look8), sw8(look8)]];
   traceCells[6][0].textContent = "外观 " + LOOK_LABEL[dr.lookName];
   const cur = TRACE.reduce((k, [, at], i) => (p >= at ? i : k), 0);
   rows.forEach(([txt, col], i) => {
@@ -1428,36 +1412,46 @@ function updateTrace(p) {
 }
 drCanvas.addEventListener("pointermove", (e) => { if (!trsec.hidden) { traceUV = screenToUV(e.clientX, e.clientY); needsDraw = true; } });
 
-// the colour matrix Sony's table uses for neutral greys
+// colour matrix: why colours cross over (schematic filter curves), and what it does to the blue lamp
 const matcard = document.getElementById("matcard");
 {
-  const fmt = (v) => (v < 0 ? "−" : " ") + Math.abs(v).toFixed(3);
-  const names = [["r", "R′"], ["g", "G′"], ["b", "B′"]];
-  matcard.innerHTML = `<div class="m">${ST.matrix.map((row, i) => `<span class="${names[i][0]}">${names[i][1]}</span><span>=</span>` +
-    row.map((v, j) => `<span class="k">${fmt(v)}·<span class="${names[j][0]}">${"RGB"[j]}</span></span>`).join("")).join("")}</div>` +
-    `<small>中性灰用的这一组。每行加起来都是 1，所以灰色换算后还是灰色；红绿蓝之间互相借一点，颜色才对。</small>`;
+  const W = 360, H = 120, X = (nm) => 10 + (nm - 400) / 300 * (W - 20), base = H - 22;
+  const curve = (peak, wid, col) => { let d = `M${X(400)},${base}`; for (let nm = 400; nm <= 700; nm += 4) d += ` L${X(nm).toFixed(1)},${(base - 82 * Math.exp(-(((nm - peak) / wid) ** 2))).toFixed(1)}`; return `<path d="${d} L${X(700)},${base} Z" fill="${col}" fill-opacity=".28" stroke="${col}" stroke-width="2"/>`; };
+  matcard.innerHTML = `<h4>三种滤色片的感光范围（示意）</h4>
+    <svg viewBox="0 0 ${W} ${H}" aria-hidden="true"><defs><linearGradient id="spec" x1="0" x2="1">
+      <stop offset="0" stop-color="#5a3dff"/><stop offset=".2" stop-color="#2f6bff"/><stop offset=".4" stop-color="#2fd158"/><stop offset=".55" stop-color="#e8e83a"/><stop offset=".7" stop-color="#ff8a2f"/><stop offset="1" stop-color="#d81f1f"/></linearGradient></defs>
+      ${curve(465, 42, "#7fa8ff")}${curve(535, 48, "#7ee08f")}${curve(600, 45, "#ff7b6b")}
+      <rect x="${X(400)}" y="${base + 6}" width="${X(700) - X(400)}" height="7" rx="3" fill="url(#spec)"/>
+      <text x="${X(498)}" y="${base - 46}" fill="#fff" font-size="11" text-anchor="middle">重叠 = 串色</text>
+      <text x="${X(400)}" y="${H - 1}" fill="#a1a1a6" font-size="10">400 nm</text><text x="${X(700)}" y="${H - 1}" fill="#a1a1a6" font-size="10" text-anchor="end">700 nm</text></svg>
+    <div class="pair"><div><i id="mcA"></i><span class="l">相机原始</span><span id="mcAv"></span></div><span>→</span><div><i id="mcB"></i><span class="l">矩阵换算后</span><span id="mcBv"></span></div></div>
+    <small>左下角那盏蓝灯的倒影：混进来的红和绿被减掉，蓝更纯了。索尼按色相分 1024 档，每档一组系数。</small>`;
 }
-// tone curve: linear light in, display brightness out
-const curveC = document.getElementById("curve"), cg = curveC.getContext("2d");
-function drawCurve(k) {
-  const dpr = Math.min(devicePixelRatio, 2), W = curveC.clientWidth, H = curveC.clientHeight;
-  if (curveC.width !== Math.round(W * dpr)) { curveC.width = Math.round(W * dpr); curveC.height = Math.round(H * dpr); }
-  cg.setTransform(dpr, 0, 0, dpr, 0, 0); cg.clearRect(0, 0, W, H);
-  cg.fillStyle = "rgba(0,0,0,.5)"; cg.beginPath(); cg.roundRect(0, 0, W, H, 14); cg.fill();
-  const L = 40, R = W - 18, T = 18, B = H - 42, X = (x) => L + x * (R - L), Y = (y) => B - y * (B - T);
-  cg.strokeStyle = "rgba(255,255,255,.12)"; cg.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) { cg.beginPath(); cg.moveTo(X(i / 4), T); cg.lineTo(X(i / 4), B); cg.moveTo(L, Y(i / 4)); cg.lineTo(R, Y(i / 4)); cg.stroke(); }
-  const line = (f, col, w, dash = []) => { cg.strokeStyle = col; cg.lineWidth = w; cg.setLineDash(dash); cg.beginPath(); for (let i = 0; i <= 200; i++) { const x = (i / 200) ** 2; i ? cg.lineTo(X(x), Y(f(x))) : cg.moveTo(X(x), Y(f(x))); } cg.stroke(); cg.setLineDash([]); };
-  line((x) => x, "rgba(255,255,255,.45)", 1.5, [5, 5]);
-  line(enc1, "#8fb4ff", 2.2);
+function updateMatCard() {
+  const raw = pixelAtUV(...LAMP), wb = raw.map((v, c) => (v - 512) / 15871 * DR.wb[c]);
+  const a = wb.map((v) => enc1(v) * 255), b = lutSample(stageBytes[0], wb);
+  const rgb = (x) => `rgb(${x.map((v) => Math.round(v)).join(",")})`, txt = (x) => x.map((v) => Math.round(v)).join(" · ");
+  document.getElementById("mcA").style.background = rgb(a); document.getElementById("mcB").style.background = rgb(b);
+  document.getElementById("mcAv").textContent = txt(a); document.getElementById("mcBv").textContent = txt(b);
+}
+updateMatCard();
+// tone curve: grey patches one stop apart, shown as plain light amounts and through Sony's curve
+const tonecard = document.getElementById("tonecard");
+{
   const sony = (x) => { const v = x * DR.clip, c = ST.curve; let i = 1; while (i < c.length - 1 && c[i][0] < v) i++; const [x0, y0] = c[i - 1], [x1, y1] = c[i]; return (y0 + (y1 - y0) * (x1 > x0 ? (v - x0) / (x1 - x0) : 0)) / 16383; };
-  cg.save(); cg.beginPath(); cg.rect(0, 0, X(Math.max(0.001, k)), H); cg.clip(); line(sony, "#ffc66b", 3); cg.restore();
-  const gx = 0.18, gy = sony(gx);
-  if (k > 0.3) { cg.fillStyle = "#ffc66b"; cg.beginPath(); cg.arc(X(gx), Y(gy), 4.5, 0, 7); cg.fill(); cg.font = "600 12px 'JetBrains Mono', monospace"; cg.textAlign = "left"; cg.fillText(`18% 灰 → ${Math.round(gy * 100)}%`, X(gx) + 10, Y(gy) + 16); }
-  cg.font = "500 11.5px 'Noto Sans SC', sans-serif"; cg.textAlign = "left";
-  [["索尼 ST 曲线", "#ffc66b"], ["标准 sRGB 编码（前几步用的）", "rgba(143,180,255,.9)"], ["不加曲线", "rgba(255,255,255,.6)"]].forEach(([t, c], i) => { cg.fillStyle = c; cg.fillText(t, X(0.42), Y(0.36) + i * 17); });
-  cg.fillStyle = "rgba(255,255,255,.55)"; cg.textAlign = "center"; cg.fillText("进来的光（线性，1 = 白电平）", (L + R) / 2, H - 14);
-  cg.save(); cg.translate(15, (T + B) / 2); cg.rotate(-Math.PI / 2); cg.fillText("输出亮度", 0, 0); cg.restore();
+  const stops = [2, 1, 0, -1, -2, -3, -4, -5], xs = stops.map((k) => 0.18 * 2 ** k);
+  const row = (label, f) => `<div class="strip"><span>${label}</span>${xs.map((x) => { const v = Math.round(Math.min(1, f(x)) * 255); return `<i style="background:rgb(${v},${v},${v})"></i>`; }).join("")}</div>`;
+  tonecard.innerHTML = `<h4>每一格的光都是左边一格的一半</h4>
+    ${row("按光量直接显示", (x) => x)}${row("过索尼曲线", sony)}
+    <div class="strip axis"><span></span>${stops.map((k) => `<span>${k === 0 ? "中灰" : (k > 0 ? "+" : "−") + Math.abs(k)}</span>`).join("")}</div>
+    <small>上面一排，右边几格几乎分不出来；下面一排，每少一半的光就暗一级，和眼睛的感觉一致。</small>`;
+}
+// labels over the Y / Cb / Cr tiles (same layout as the shader)
+const yccLab = [...document.querySelectorAll("#ycclab div")];
+[["Y · 亮度", "过一条曲线，亮部收一收"], ["Cb · 蓝↔黄", "饱和度加大，最亮处收成灰"], ["Cr · 红↔青", "饱和度加大，最亮处收成灰"]].forEach(([t, n], i) => { yccLab[i].innerHTML = `${t}<small>${n}</small>`; });
+function placeYccLabels(k) {
+  const W = innerWidth, H = innerHeight, gap = W * 0.015, tw = (W - 4 * gap) / 3, th = tw * DR.h / DR.w, top = H - ((H - th) * 0.32 + th);
+  yccLab.forEach((el, i) => { el.style.left = gap + i * (tw + gap) + tw / 2 + "px"; el.style.top = top - 58 + "px"; el.style.opacity = k.toFixed(3); });
 }
 
 /* =========================================================
@@ -1610,30 +1604,29 @@ function draw(now, fixed) {
   // darkroom
   const drOn = seg(p, 0.975, 0.99);
   drCanvas.style.opacity = drOn.toFixed(3);
-  drCanvas.style.pointerEvents = p > 1.19 ? "auto" : "none";
+  drCanvas.style.pointerEvents = p > 1.29 ? "auto" : "none";
   if (drOn > 0) {
     dr.black = ease(seg(p, 1.025, 1.06));
     dr.white = ease(seg(p, 1.11, 1.145));
     dr.zebra = Math.min(seg(p, 1.095, 1.11), 1 - seg(p, 1.15, 1.17));
     dr.wbMix = ease(seg(p, 1.2, 1.24));
-    dr.mat = ease(seg(p, 1.32, 1.37)); dr.tone = ease(seg(p, 1.425, 1.475)); dr.refine = ease(seg(p, 1.53, 1.58));
-    dr.look = ease(seg(p, 1.6, 1.62));
+    dr.mat = ease(seg(p, 1.32, 1.37)); dr.tone = ease(seg(p, 1.425, 1.475));
+    dr.split = ease(seg(p, 1.515, 1.535)) * (1 - ease(seg(p, 1.6, 1.62))); dr.refine = ease(seg(p, 1.545, 1.59));
+    dr.look = ease(seg(p, 1.64, 1.66));
     drawDarkroom();
     matcard.style.opacity = Math.min(seg(p, 1.3, 1.315), 1 - seg(p, 1.375, 1.39)).toFixed(3);
-    const cOn = Math.min(seg(p, 1.405, 1.42), 1 - seg(p, 1.48, 1.495));
-    curveC.style.opacity = cOn.toFixed(3);
-    if (cOn > 0) drawCurve(dr.tone);
+    tonecard.style.opacity = Math.min(seg(p, 1.405, 1.42), 1 - seg(p, 1.48, 1.495)).toFixed(3);
+    placeYccLabels(Math.min(seg(p, 1.525, 1.54), 1 - seg(p, 1.595, 1.605)));
     const hOn = Math.min(seg(p, 1.0, 1.015), 1 - seg(p, 1.155, 1.17));
     $("hist").style.opacity = hOn.toFixed(3);
     if (hOn > 0) drawHist();
-  } else { $("hist").style.opacity = 0; matcard.style.opacity = 0; curveC.style.opacity = 0; }
-  picking = p > 1.2;
-  const end = p >= 1.84;
-  wbsec.hidden = !((p >= 1.17 && p < 1.295) || end); trsec.hidden = p < 1.295; looksec.hidden = p < 1.61;
-  panel.classList.toggle("on", p > 1.2); panel.classList.toggle("end", end);
-  if (!trsec.hidden && drOn > 0) { updateTrace(p); const [mx, my] = uvToScreen(...traceUV); tracemark.style.left = mx + "px"; tracemark.style.top = my + "px"; tracemark.style.opacity = 1; }
+  } else { $("hist").style.opacity = 0; matcard.style.opacity = 0; tonecard.style.opacity = 0; placeYccLabels(0); }
+  const end = p >= 1.77;
+  trsec.hidden = p < 1.295; looksec.hidden = p < 1.645;
+  // the panel steps aside while the picture is split into three tiles
+  panel.classList.toggle("on", p > 1.295 && dr.split < 0.05); panel.classList.toggle("end", end);
+  if (!trsec.hidden && drOn > 0 && dr.split < 0.05) { updateTrace(p); const [mx, my] = uvToScreen(...traceUV); tracemark.style.left = mx + "px"; tracemark.style.top = my + "px"; tracemark.style.opacity = 1; }
   else tracemark.style.opacity = 0;
-  if (p < 1.2) pickmark.style.opacity = 0;
 }
 requestAnimationFrame(frame);
 $("loading").style.opacity = 0;
