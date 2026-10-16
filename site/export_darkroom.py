@@ -1,4 +1,4 @@
-"""Darkroom assets for index.html: block-mean raw image, per-look 3D LUTs, demosaic crop.
+"""Darkroom assets for index.html: raw image (sqrt-encoded WebP), per-look 3D LUTs, demosaic crop.
 
 usage: python3 site/export_darkroom.py DSC05651.ARW site/assets   (the ARW is only read)
 """
@@ -25,10 +25,16 @@ with rawpy.imread(ARW) as r:
     raw = vis[R.CROP["top"]:R.CROP["top"] + R.CROP["height"], R.CROP["left"]:R.CROP["left"] + R.CROP["width"]].astype(np.float64)
     lin16 = r.postprocess(use_camera_wb=True, no_auto_bright=True, gamma=(1, 1), output_bps=16, output_color=rawpy.ColorSpace.raw, user_flip=0)
 
-# 1) raw block means (black level still in), R / mean(G) / B
+# 1) raw image for the darkroom: 2x2 CFA -> RGB, area-resized to 2560 px wide, black level still in.
+#    Stored as 8-bit sqrt(max(raw - 500, 0) / 15883) in a lossless WebP; the page decodes raw = 500 + e^2 * 15883.
+WIDTH = 2560
+half = F.block_average(raw, 2)
+hh = round(half.shape[0] * WIDTH / half.shape[1])
+big = np.stack([np.asarray(Image.fromarray(half[..., c].astype(np.float32), "F").resize((WIDTH, hh), Image.BOX)) for c in range(3)], -1)
+enc = np.round(255 * np.sqrt(np.clip((big - 500) / 15883, 0, 1))).astype(np.uint8)
+Image.fromarray(enc).save(OUT / "raw.webp", "WEBP", lossless=True, quality=100, method=6)
+h, w = enc.shape[:2]
 blk = F.block_average(raw, S)
-h, w = blk.shape[:2]
-np.round(blk).astype("<u2").tofile(OUT / "raw_s8.bin")
 
 # 2) look LUTs on a sqrt-shaped grid of Sony-linear input
 u = np.linspace(0, 1, G)
@@ -46,7 +52,7 @@ n = (blk - 512) / (16383 - 512) * wb
 uu = np.sqrt(np.clip(n * CLIP / 16383, 0, 1))
 lut = np.fromfile(OUT / "luts" / "ST.bin", np.uint8).reshape(G, G, G, 3).astype(np.float64)
 pts = uu.reshape(-1, 3)
-pred = np.stack([RegularGridInterpolator((u, u, u), lut[..., c])(pts) for c in range(3)], -1).reshape(h, w, 3)
+pred = np.stack([RegularGridInterpolator((u, u, u), lut[..., c])(pts) for c in range(3)], -1).reshape(*blk.shape[:2], 3)
 ref = R.Look("ST", looks).render(R.front_end_sony(ARW, S, lens=False)) / 64.0
 print("LUT path vs renderer, 8-bit MAE:", round(float(np.abs(pred - ref).mean()), 3))
 
@@ -58,6 +64,6 @@ c = lin16[y0:y0 + 256, x0:x0 + 384].astype(np.float64) / 65535
 c = np.sqrt(np.clip(c, 0, 1)) * 255
 Image.fromarray(c.clip(0, 255).astype(np.uint8)).resize((384 * 4, 256 * 4), Image.NEAREST).save(OUT / "demosaic.png", optimize=True)
 
-json.dump(dict(w=w, h=h, scale=S, black=512, white=16383, clip=CLIP, grid=G, wb=wb.round(4).tolist(),
+json.dump(dict(w=w, h=h, enc="sqrt8", enc_black=500, enc_range=15883, black=512, white=16383, clip=CLIP, grid=G, wb=wb.round(4).tolist(),
                looks=names), open(OUT / "darkroom.json", "w"))
 print(w, h, names)
