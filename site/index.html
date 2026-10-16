@@ -778,7 +778,7 @@ function renderReflection(t) {
 
 /* near bank */
 const near = new THREE.Group(); world.add(near);
-const nearBg = new THREE.Group(); city.add(nearBg);   // shrinks into the lens with the far bank
+const nearBg = new THREE.Group(); city.add(nearBg);   // near-bank scenery (lamps, trees, houses)
 const cobble = canvasTex(512, 512, (g, w, h) => {
   g.fillStyle = "#0d0c0b"; g.fillRect(0, 0, w, h); seed = 3;
   for (let y = 0, r = 0; y < h; y += 16, r++) for (let x = r % 2 ? -16 : 0; x < w; x += 32) {
@@ -845,43 +845,121 @@ ribTex.wrapS = THREE.RepeatWrapping; ribTex.repeat.set(10, 1);
 const grainTex = canvasTex(128, 128, (g, w, h) => { const d = g.createImageData(w, h); for (let i = 0; i < d.data.length; i += 4) { const v = 110 + Math.random() * 60; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; } g.putImageData(d, 0, 0); }, false);
 grainTex.wrapS = grainTex.wrapT = THREE.RepeatWrapping; grainTex.repeat.set(6, 6);
 
-/* ---------- the camera: mirrorless body + 20-70 mm zoom ---------- */
+/* ---------- the camera: Sony α7 V body + FE 20-70 mm F4 G ---------- */
+// units are metres; lens axis along -z, the grip on +x (the photographer's right)
 const CAM = V(1.6, QUAY + 1.5, 10.2);           // body centre, lens towards -z
 const camBody = new THREE.Group(); camBody.position.copy(CAM); world.add(camBody);
-const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0x17181b, roughness: 0.5, metalness: 0.15, clearcoat: 0.3, clearcoatRoughness: 0.6, envMap: envTex, envMapIntensity: 0.7 });
-const rubber = new THREE.MeshStandardMaterial({ color: 0x0f1012, roughness: 0.95, bumpMap: grainTex, bumpScale: 0.6, envMap: envTex, envMapIntensity: 0.3 });
+const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0x151618, roughness: 0.62, metalness: 0.1, clearcoat: 0.15, clearcoatRoughness: 0.7, bumpMap: grainTex, bumpScale: 0.08, envMap: envTex, envMapIntensity: 0.6 });
+const rubber = new THREE.MeshStandardMaterial({ color: 0x0e0f11, roughness: 0.95, bumpMap: grainTex, bumpScale: 0.6, envMap: envTex, envMapIntensity: 0.3 });
 const silver = new THREE.MeshStandardMaterial({ color: 0xc4c8cf, roughness: 0.25, metalness: 1, envMap: envTex });
 const ribbed = new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.8, bumpMap: ribTex, bumpScale: 1.2, envMap: envTex, envMapIntensity: 0.4 });
+const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x121315, roughness: 0.45, metalness: 0.2, clearcoat: 0.25, clearcoatRoughness: 0.5, envMap: envTex, envMapIntensity: 0.7 });
+const redMat = new THREE.MeshStandardMaterial({ color: 0xb01818, roughness: 0.4 });
+const satin = new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.45, metalness: 1, envMap: envTex, envMapIntensity: 0.45 });   // shoe and mount: brushed, not mirror
 function addTo(parent, mesh, x, y, z) { mesh.position.set(x, y, z); parent.add(mesh); return mesh; }
-addTo(camBody, new THREE.Mesh(new RoundedBoxGeometry(0.124, 0.07, 0.04, 5, 0.008), bodyMat), 0, 0, 0);
-addTo(camBody, new THREE.Mesh(new RoundedBoxGeometry(0.036, 0.074, 0.064, 5, 0.013), rubber), 0.046, -0.002, -0.014);
-{ // viewfinder hump
-  const s = new THREE.Shape(); s.moveTo(-0.028, 0); s.lineTo(0.028, 0); s.lineTo(0.017, 0.024); s.lineTo(-0.017, 0.024); s.closePath();
-  const hump = new THREE.Mesh(new THREE.ExtrudeGeometry(s, { depth: 0.046, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 3 }), bodyMat);
-  addTo(camBody, hump, 0, 0.033, -0.025);
-  addTo(camBody, new THREE.Mesh(new RoundedBoxGeometry(0.042, 0.03, 0.016, 4, 0.006), rubber), 0, 0.048, 0.026);
+const rbox = (w, h, d, r, m, x, y, z) => addTo(camBody, new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 4, r), m), x, y, z);
+const cyl = (r, h, m, x, y, z, axis = "y", seg = 48) => { const c = addTo(camBody, new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), m), x, y, z); if (axis === "z") c.rotation.x = Math.PI / 2; if (axis === "x") c.rotation.z = Math.PI / 2; return c; };
+const decal = (w, h, tw, th, draw, x, y, z, ry = 0) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: canvasTex(tw, th, draw), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+  m.rotation.y = ry; return addTo(camBody, m, x, y, z);
+};
+const text = (str, font, color = "#e9e9e9") => (g, w, h) => { g.fillStyle = color; g.font = font; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(str, w / 2, h / 2); };
+
+// chassis (top plate at y = 0.03, bottom at -0.036, front face at z = -0.022)
+rbox(0.13, 0.066, 0.04, 0.006, bodyMat, 0, -0.003, -0.002);
+// deep grip with a leather-textured cover, rounded towards the front
+rbox(0.04, 0.068, 0.07, 0.017, rubber, 0.047, -0.004, -0.024);
+rbox(0.042, 0.03, 0.05, 0.012, bodyMat, 0.046, 0.019, -0.022);          // upper grip shell
+{ // sloped top of the grip carrying the shutter button
+  const t = rbox(0.038, 0.012, 0.042, 0.005, bodyMat, 0.048, 0.031, -0.036); t.rotation.x = -0.32;
 }
-const dial = (r, h, x, z) => { const d = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 48), ribbed); addTo(camBody, d, x, 0.035 + h / 2, z); return d; };
-dial(0.012, 0.009, -0.042, 0.004); dial(0.011, 0.008, 0.034, 0.008); dial(0.0095, 0.006, 0.05, 0.012);
-const shutter = new THREE.Group(); addTo(camBody, shutter, 0.05, 0.036, -0.03);
-{ const collar = new THREE.Mesh(new THREE.TorusGeometry(0.0085, 0.002, 10, 32), silver); collar.rotation.x = Math.PI / 2; shutter.add(collar); }
-const button = new THREE.Mesh(new THREE.CylinderGeometry(0.0062, 0.0062, 0.004, 32), silver); button.position.y = 0.002; shutter.add(button);
-addTo(camBody, new THREE.Mesh(new THREE.CylinderGeometry(0.031, 0.031, 0.004, 64), silver), 0, -0.004, -0.022).rotation.x = Math.PI / 2;
-// lens barrel: mount, zoom ring, centre, focus ring, front
-[[0.033, 0.012, -0.03, bodyMat], [0.0385, 0.036, -0.054, ribbed], [0.037, 0.012, -0.078, bodyMat], [0.0375, 0.02, -0.094, ribbed], [0.039, 0.016, -0.112, bodyMat]].forEach(([r, l, z, m]) => {
-  const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, l, 64), m); c.rotation.x = Math.PI / 2; addTo(camBody, c, 0, -0.004, z);
-});
-const lensFront = new THREE.Mesh(new THREE.RingGeometry(0.026, 0.039, 64), bodyMat); lensFront.rotation.y = Math.PI; addTo(camBody, lensFront, 0, -0.004, -0.1201);
-const glass = new THREE.Mesh(new THREE.CircleGeometry(0.026, 64), new THREE.MeshPhysicalMaterial({ color: 0x0a1630, roughness: 0.03, metalness: 0.9, envMap: envTex, envMapIntensity: 1.6, clearcoat: 1, iridescence: 0.8, iridescenceIOR: 1.6 }));
-glass.rotation.y = Math.PI; addTo(camBody, glass, 0, -0.004, -0.118);
-const gBadge = new THREE.Mesh(new THREE.PlaneGeometry(0.008, 0.008), new THREE.MeshBasicMaterial({ map: canvasTex(64, 64, (g) => { g.fillStyle = "#e8e8e8"; g.font = "700 52px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("G", 32, 34); }), transparent: true }));
-gBadge.position.set(0.026, 0.024, -0.075); gBadge.rotation.set(0, Math.PI / 2 - 0.6, 0); camBody.add(gBadge);
-// rear: screen with frame, buttons, wheel
-addTo(camBody, new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.056, 0.006, 3, 0.003), bodyMat), -0.012, -0.006, 0.021);
-const lcd = new THREE.Mesh(new THREE.PlaneGeometry(0.072, 0.048), new THREE.MeshBasicMaterial({ color: 0x05070a, toneMapped: false }));
-addTo(camBody, lcd, -0.012, -0.006, 0.0245);
-for (let i = 0; i < 3; i++) addTo(camBody, new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.003, 20), bodyMat), 0.045, 0.02 - i * 0.014, 0.021).rotation.x = Math.PI / 2;
-addTo(camBody, new THREE.Mesh(new THREE.TorusGeometry(0.008, 0.0022, 10, 40), ribbed), 0.045, -0.022, 0.021);
+// front dial, half sunk into the top of the grip
+cyl(0.0105, 0.007, ribbed, 0.046, 0.026, -0.058, "y");
+// EVF hump: faceted trapezoid, multi-interface shoe on top, logo on the front
+{
+  const s = new THREE.Shape();
+  s.moveTo(-0.029, 0); s.lineTo(0.029, 0); s.lineTo(0.021, 0.021); s.lineTo(0.016, 0.0265); s.lineTo(-0.016, 0.0265); s.lineTo(-0.021, 0.021); s.closePath();
+  const hump = new THREE.Mesh(new THREE.ExtrudeGeometry(s, { depth: 0.04, bevelEnabled: true, bevelSize: 0.0015, bevelThickness: 0.0015, bevelSegments: 2 }), bodyMat);
+  addTo(camBody, hump, 0, 0.028, -0.021);
+  rbox(0.024, 0.0018, 0.021, 0.0006, satin, 0, 0.0565, -0.0005);                    // shoe plate
+  for (const sx of [-0.0115, 0.0115]) rbox(0.0022, 0.0028, 0.021, 0.0005, satin, sx, 0.0575, -0.0005);
+  rbox(0.014, 0.001, 0.004, 0.0003, new THREE.MeshStandardMaterial({ color: 0x050505 }), 0, 0.0575, 0.006);  // shoe contacts
+  decal(0.03, 0.0075, 256, 64, text("SONY", "700 54px 'Helvetica Neue', Arial, sans-serif"), 0, 0.0405, -0.0232, Math.PI);
+  // big eyecup and the viewfinder glass
+  rbox(0.05, 0.034, 0.02, 0.008, rubber, 0, 0.044, 0.026);
+  const evf = addTo(camBody, new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.02, 0.002, 2, 0.003), new THREE.MeshPhysicalMaterial({ color: 0x020306, roughness: 0.05, metalness: 0.5, clearcoat: 1, envMap: envTex })), 0, 0.044, 0.0357);
+  evf.scale.z = 0.5;
+}
+// top left: stacked mode dial with a lock button, still/movie/S&Q collar underneath
+cyl(0.0135, 0.004, bodyMat, -0.043, 0.032, 0.002);
+cyl(0.0122, 0.009, ribbed, -0.043, 0.0385, 0.002);
+cyl(0.004, 0.0015, satin, -0.043, 0.0436, 0.002, "y", 24);
+rbox(0.006, 0.003, 0.004, 0.001, bodyMat, -0.057, 0.032, 0.006);         // collar lever
+// top right: shutter with power-switch collar, C1 / C2, movie button, exposure dial, rear dial
+const shutter = new THREE.Group(); addTo(camBody, shutter, 0.049, 0.0385, -0.042); shutter.rotation.x = -0.32;
+{ const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.0105, 0.0105, 0.003, 40), bodyMat); shutter.add(collar);
+  const lever = new THREE.Mesh(new RoundedBoxGeometry(0.008, 0.003, 0.006, 2, 0.001), bodyMat); lever.position.set(0.012, 0, 0.004); lever.rotation.y = -0.5; shutter.add(lever); }
+const button = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.0065, 0.004, 40), silver); button.position.y = 0.002; shutter.add(button);
+cyl(0.004, 0.003, bodyMat, 0.039, 0.0335, -0.018, "y", 24);             // C1
+cyl(0.004, 0.003, bodyMat, 0.055, 0.0335, -0.016, "y", 24);             // C2
+cyl(0.0035, 0.003, redMat, 0.026, 0.0315, -0.014, "y", 24);             // movie record
+cyl(0.0115, 0.008, ribbed, 0.031, 0.034, 0.008);                        // exposure / dial L
+cyl(0.0105, 0.007, ribbed, 0.058, 0.03, 0.017);                         // rear dial R at the corner
+// strap lugs
+for (const sx of [-0.066, 0.068]) { const lug = addTo(camBody, new THREE.Mesh(new THREE.TorusGeometry(0.004, 0.0012, 8, 20), silver), sx, 0.022, -0.004); lug.rotation.y = Math.PI / 2; }
+// front: silver bayonet, lens release, AF lamp, α badge
+cyl(0.0315, 0.003, satin, 0, -0.004, -0.0235, "z", 64);
+cyl(0.0045, 0.003, bodyMat, -0.04, -0.017, -0.0235, "z", 24);
+cyl(0.003, 0.0015, new THREE.MeshPhysicalMaterial({ color: 0x401010, roughness: 0.1, clearcoat: 1 }), 0.03, 0.018, -0.0606, "z", 20);
+decal(0.02, 0.007, 256, 96, text("α7 V", "500 64px 'Helvetica Neue', Arial, sans-serif"), -0.047, -0.026, -0.0222, Math.PI);
+// lens: rear mount ring, barrel, wide zoom ring, focal-length band, focus ring, front with name ring
+{
+  const ring = (r, l, z, m) => cyl(r, l, m, 0, -0.004, z, "z", 64);
+  ring(0.031, 0.006, -0.028, satin);
+  ring(0.0345, 0.012, -0.037, lensMat);
+  ring(0.0388, 0.034, -0.06, ribbed);                                    // zoom ring
+  const band = ring(0.0372, 0.008, -0.081, new THREE.MeshStandardMaterial({ color: 0x141517, roughness: 0.5, map: canvasTex(1024, 64, (g, w, h) => {
+    g.fillStyle = "#141517"; g.fillRect(0, 0, w, h); g.fillStyle = "#e6e6e6"; g.font = "600 30px 'Helvetica Neue', Arial, sans-serif"; g.textBaseline = "middle";
+    for (let k = 0; k < 2; k++) ["20", "24", "35", "50", "70"].forEach((t, i) => g.fillText(t, k * 512 + 40 + i * 80, h / 2));
+  }) }));
+  band.rotation.y = 0.8;
+  ring(0.0382, 0.02, -0.096, ribbed);                                    // focus ring
+  // the front of the barrel is an open tube, so the glass inside it can be seen
+  const open = (r, l, z, m) => { const c = addTo(camBody, new THREE.Mesh(new THREE.CylinderGeometry(r, r, l, 64, 1, true), m), 0, -0.004, z); c.rotation.x = Math.PI / 2; return c; };
+  open(0.0392, 0.016, -0.113, lensMat.clone()).material.side = THREE.DoubleSide;
+  const name = open(0.0393, 0.005, -0.1185, new THREE.MeshStandardMaterial({ color: 0x0d0e10, roughness: 0.4, map: canvasTex(1024, 32, (g, w, h) => {
+    g.fillStyle = "#0d0e10"; g.fillRect(0, 0, w, h); g.fillStyle = "#cfcfcf"; g.font = "500 20px 'Helvetica Neue', Arial, sans-serif"; g.textBaseline = "middle";
+    for (let k = 0; k < 2; k++) g.fillText("FE 4/20-70 G   Ø72", k * 512 + 60, h / 2);
+  }) }));
+  // AF/MF switch and focus-hold button on the left of the barrel
+  rbox(0.004, 0.012, 0.016, 0.0015, lensMat, -0.0372, 0.004, -0.044);
+  rbox(0.002, 0.003, 0.006, 0.0008, silver, -0.0395, 0.007, -0.044);
+  cyl(0.003, 0.003, lensMat, -0.0365, -0.006, -0.045, "x", 20);
+}
+const lensFront = new THREE.Mesh(new THREE.RingGeometry(0.027, 0.0393, 64), lensMat); lensFront.rotation.y = Math.PI; addTo(camBody, lensFront, 0, -0.004, -0.1211);
+// front element: a slightly domed, multi-coated surface, with the darker inner elements and a retaining ring behind it
+const glass = new THREE.Mesh(new THREE.SphereGeometry(0.06, 64, 16, 0, Math.PI * 2, 0, 0.47), new THREE.MeshPhysicalMaterial({ color: 0x050a12, roughness: 0.04, metalness: 0.2, envMap: envTex, envMapIntensity: 1.1, clearcoat: 1, iridescence: 0.5, iridescenceIOR: 1.45, iridescenceThicknessRange: [250, 420] }));
+glass.rotation.x = -Math.PI / 2; addTo(camBody, glass, 0, -0.004, -0.0565);   // cap of a sphere: rim at z -0.1105, crest at -0.1165
+addTo(camBody, new THREE.Mesh(new THREE.TorusGeometry(0.0272, 0.0012, 8, 64), lensMat), 0, -0.004, -0.111);
+// "G" lens badge on the barrel, facing the photographer's side
+const gBadge = decal(0.007, 0.007, 64, 64, (g) => { g.fillStyle = "#d8d8d8"; g.font = "700 52px 'Helvetica Neue', Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("G", 32, 34); }, 0.0272, 0.024, -0.105, Math.PI / 2 - 0.78);
+gBadge.quaternion.setFromUnitVectors(V(0, 0, 1), V(0.0272, 0.028, 0).normalize());
+// rear: vari-angle screen on its hinge, MENU / C3 on the left, AF-ON, joystick, control wheel on the right
+rbox(0.082, 0.056, 0.008, 0.003, bodyMat, -0.013, -0.007, 0.0215);
+rbox(0.006, 0.05, 0.004, 0.0015, bodyMat, -0.057, -0.007, 0.019);       // hinge
+const lcd = new THREE.Mesh(new THREE.PlaneGeometry(0.073, 0.049), new THREE.MeshBasicMaterial({ color: 0x05070a, toneMapped: false }));
+addTo(camBody, lcd, -0.013, -0.007, 0.0257);
+rbox(0.008, 0.005, 0.003, 0.0012, bodyMat, -0.045, 0.026, 0.0185);       // MENU
+rbox(0.008, 0.005, 0.003, 0.0012, bodyMat, -0.033, 0.026, 0.0185);       // C3
+decal(0.012, 0.003, 128, 32, text("MENU", "600 26px Arial, sans-serif", "#bdbdbd"), -0.045, 0.0305, 0.0182);
+rbox(0.012, 0.007, 0.004, 0.002, rubber, 0.044, 0.021, 0.021);          // AF-ON
+decal(0.01, 0.003, 128, 40, text("AF-ON", "700 28px Arial, sans-serif", "#bdbdbd"), 0.044, 0.0263, 0.0186);
+cyl(0.0035, 0.004, rubber, 0.05, 0.007, 0.021, "z", 24);                // joystick
+cyl(0.0042, 0.002, ribbed, 0.05, 0.007, 0.0235, "z", 24);
+addTo(camBody, new THREE.Mesh(new THREE.TorusGeometry(0.0085, 0.0024, 10, 48), ribbed), 0.049, -0.016, 0.0205);   // control wheel
+cyl(0.004, 0.003, bodyMat, 0.049, -0.016, 0.0205, "z", 24);
+for (const [bx, by] of [[0.036, -0.028], [0.061, -0.028], [0.036, -0.003]]) cyl(0.0028, 0.002, bodyMat, bx, by, 0.0205, "z", 20);
+rbox(0.024, 0.02, 0.004, 0.004, rubber, 0.055, 0.02, 0.0205).scale.set(0.6, 1, 1);   // thumb rest
 
 /* ---------- tripod ---------- */
 const tripod = new THREE.Group(); world.add(tripod);
@@ -949,7 +1027,7 @@ const elR = V(P.x + 0.27, QUAY + 1.18, P.z - 0.2), elL = V(P.x - 0.22, QUAY + 1.
   const hand = new THREE.Mesh(new RoundedBoxGeometry(0.035, 0.085, 0.05, 3, 0.014), skin);
   hand.position.copy(h); hand.quaternion.setFromUnitVectors(V(0, 1, 0), h.clone().sub(e).normalize()); person.add(hand);
 });
-const finger = tube(handR.clone().add(V(-0.01, 0.01, -0.005)), CAM.clone().add(V(0.05, 0.041, -0.03)), 0.008, 0.007, skin, person);
+const finger = tube(handR.clone().add(V(-0.01, 0.01, -0.005)), CAM.clone().add(V(0.049, 0.043, -0.04)), 0.008, 0.007, skin, person);
 fadeable(person);
 
 const LENS = CAM.clone().add(V(0, -0.004, -0.12));
@@ -1348,11 +1426,6 @@ function draw(now, fixed) {
     if (p > 0.284 && !lcd.userData.on) { lcd.userData.off = lcd.material; lcd.userData.on = new THREE.MeshBasicMaterial({ map: photoTex, toneMapped: false }); }
     lcd.material = p > 0.284 ? lcd.userData.on : (lcd.userData.off || lcd.material);
     setOpacity(person, 1 - seg(p, 0.288, 0.302));
-    const s = 1 - ease(seg(p, 0.305, 0.375));
-    const sc = Math.max(0.0005, Math.pow(s, 2.2));
-    city.scale.setScalar(sc); city.position.copy(LENS).multiplyScalar(1 - sc);
-    city.visible = sc > 0.012;
-    world.fog.density = 0.0045 * sc + 0.0001;
   } else {
     renderer.toneMappingExposure = 1.0;
     const [pos, tgt] = pathAt(LAB_KEYS, p);
