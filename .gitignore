@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+render_output/
+# photos and exports stay local; only the synthetic chart is published
+*.ARW
+*.arw
+!chart/SonyChart.ARW
+*.tif
+*.TIF
+*.tiff
+chart/measure_*.json
+chart/*.npy
