@@ -48,9 +48,6 @@ tint = np.array([[1.0, 0.25, 0.2], [0.3, 1.0, 0.35], [0.25, 0.4, 1.0]])
 def bayer_img(y0, x0, h, w):
     kk = k[y0:y0 + h, x0:x0 + w]; cc = ch[y0:y0 + h, x0:x0 + w]
     return kk[..., None] * tint[cc] * 255
-# whole frame, CFA as grey (what a raw file "is")
-grey = srgb(np.clip(raw - 512, 0, None) / 8000.0)
-sizes["raw_grey"] = save(grey[::2, ::2], "raw_grey.jpg", 2000)
 # 1:1 crop of lit windows, nearest-upscaled so the mosaic stays crisp
 cy, cx = int(0.40 * H) // 2 * 2, int(0.385 * W) // 2 * 2
 crop = bayer_img(cy - 128, cx - 192, 256, 384)
