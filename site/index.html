@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>一张照片的诞生</title>
+<meta name="description" content="从阿姆斯特丹运河边按下快门，到 CMOS、拜耳阵列和 ADC 读出：跟着光走一遍 Sony α7 V 里的一张 RAW 是怎么产生的。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root {
+  --bg: #000; --fg: #f5f5f7; --muted: #a1a1a6; --accent: #8fb4ff; --warm: #ffc66b;
+  --sans: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); }
+body { overscroll-behavior-y: none; }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#track { height: 1800vh; }
+.overlay { position: fixed; inset: 0; pointer-events: none; }
+.cap {
+  position: fixed; left: max(24px, env(safe-area-inset-left, 0px) + 24px); right: 24px;
+  bottom: calc(10vh + env(safe-area-inset-bottom, 0px)); max-width: 640px;
+  opacity: 0; transform: translateY(24px); will-change: opacity, transform;
+}
+.cap.center { left: 0; right: 0; margin: 0 auto; text-align: center; bottom: auto; top: 50%; translate: 0 -50%; padding: 0 24px; max-width: 900px; }
+.cap.top { bottom: auto; top: calc(9vh + env(safe-area-inset-top, 0px)); }
+.cap h2 { margin: 0 0 12px; font-weight: 900; font-size: clamp(2rem, 5.4vw, 4.4rem); line-height: 1.08; letter-spacing: -0.01em; text-wrap: balance; }
+.cap p { margin: 0; font-size: clamp(1rem, 1.6vw, 1.3rem); line-height: 1.6; color: var(--muted); font-weight: 500; }
+.cap p b { color: var(--fg); font-weight: 700; }
+.cap .eyebrow { display: block; font: 500 0.8rem/1 var(--mono); letter-spacing: 0.14em; color: var(--accent); margin-bottom: 14px; text-transform: uppercase; }
+.hint { margin-top: 28px; font: 500 0.85rem/1 var(--mono); color: var(--muted); letter-spacing: 0.1em; }
+.hint::after { content: ""; display: block; width: 1px; height: 40px; margin: 14px auto 0; background: linear-gradient(var(--muted), transparent); animation: drip 1.8s ease-in-out infinite; }
+@keyframes drip { 0% { transform: scaleY(0); transform-origin: top; } 50% { transform: scaleY(1); transform-origin: top; } 51% { transform-origin: bottom; } 100% { transform: scaleY(0); transform-origin: bottom; } }
+.photo { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; background: #000; }
+.photo.pix { image-rendering: pixelated; object-fit: cover; }
+#flash { position: fixed; inset: 0; background: #fff; opacity: 0; }
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; }
+#numbers { position: fixed; left: 50%; top: 50%; translate: -50% -54%; opacity: 0; font: 500 clamp(8px, 1.15vw, 14px)/1.55 var(--mono); display: grid; grid-template-columns: repeat(16, auto); gap: 0 0.9em; font-variant-numeric: tabular-nums; }
+#numbers span { opacity: 0; transition: opacity 0.25s; text-align: right; }
+#numbers span.on { opacity: 1; }
+#numbers .r { color: #ff7b6b; } #numbers .g { color: #7ee08f; } #numbers .b { color: #7fa8ff; }
+.end a { pointer-events: auto; color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(143,180,255,.4); }
+.end a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#bar { position: fixed; left: 0; top: 0; height: 2px; background: var(--accent); width: 0; opacity: 0.7; }
+#loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); font: 500 0.85rem var(--mono); letter-spacing: 0.1em; transition: opacity 0.6s; }
+@media (max-width: 700px) {
+  .cap { bottom: calc(7vh + env(safe-area-inset-bottom, 0px)); }
+  #numbers { grid-template-columns: repeat(8, auto); font-size: clamp(11px, 3.2vw, 15px); }
+  #numbers span.wide { display: none; }
+}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="gl" aria-hidden="true"></canvas>
+<div id="track"></div>
+
+<img class="photo pix" id="img-bayer" src="assets/raw_bayer.png" alt="RAW 马赛克的 1:1 局部">
+<img class="photo" id="img-raw" src="assets/raw_grey.jpg" alt="整张 RAW 数据按灰度显示">
+<img class="photo" id="img-final" src="assets/final.jpg" alt="经过索尼 ST 外观处理后的最终照片">
+<div id="numbers" aria-label="RAW 读数"></div>
+<div id="flash"></div>
+<div id="fade"></div>
+
+<div class="overlay">
+  <section class="cap center" data-in="-1" data-out="0.05">
+    <span class="eyebrow">Sony α7 V · DSC05651</span>
+    <h2>一张照片的诞生</h2>
+    <p>从运河边的光，到 RAW 文件里的一串数字。</p>
+    <div class="hint">向下滚动</div>
+  </section>
+  <section class="cap" data-in="0.06" data-out="0.15">
+    <span class="eyebrow">2026.09.21 · 19:24</span>
+    <h2>阿姆斯特丹，蓝调时刻</h2>
+    <p>太阳落下二十分钟，天空还剩一点蓝，运河边的窗户已经亮起来。</p>
+  </section>
+  <section class="cap" data-in="0.17" data-out="0.23">
+    <h2>架好相机</h2>
+    <p>20 mm，f/8，ISO 100。光线太暗，要靠长曝光把它攒够。</p>
+  </section>
+  <section class="cap" data-in="0.235" data-out="0.285">
+    <h2>按下快门</h2>
+    <p>快门打开 <b>13 秒</b>。这 13 秒里落进镜头的每一个光子，都会被记下来。</p>
+  </section>
+  <section class="cap" data-in="0.30" data-out="0.39">
+    <h2>整条运河，缩进 36 × 24 毫米</h2>
+    <p>镜头把场景投射到相机深处的一块芯片上。</p>
+  </section>
+  <section class="cap" data-in="0.45" data-out="0.53">
+    <span class="eyebrow">CMOS 图像传感器</span>
+    <h2>7008 × 4672 个感光点</h2>
+    <p>约 3270 万个。每一个只有几微米宽，只做一件事：数光。</p>
+  </section>
+  <section class="cap" data-in="0.56" data-out="0.63">
+    <span class="eyebrow">拜耳阵列</span>
+    <h2>每个点只看见一种颜色</h2>
+    <p>最上面是微透镜，把光聚进去；下面是滤色片，按 2×2 排列：<b style="color:#ff7b6b">一红</b>、<b style="color:#7ee08f">两绿</b>、<b style="color:#7fa8ff">一蓝</b>。</p>
+  </section>
+  <section class="cap" data-in="0.64" data-out="0.72">
+    <span class="eyebrow">光电转换</span>
+    <h2>光子变成电子</h2>
+    <p>落进来的光越多，感光点里攒下的电荷越多。柱子的高度是这张照片里 8 × 8 个感光点的真实读数。</p>
+  </section>
+  <section class="cap" data-in="0.74" data-out="0.835">
+    <span class="eyebrow">ADC 读出</span>
+    <h2>逐行读出，变成数字</h2>
+    <p>一整行同时读出，模数转换器把电荷量化成 <b>0 – 16383</b> 的 14 位整数。读完的感光点清零，等下一张。</p>
+  </section>
+  <section class="cap top" data-in="0.85" data-out="0.895">
+    <span class="eyebrow">RAW 数据</span>
+    <h2>这就是 RAW</h2>
+    <p>一张表，只有数字。黑暗处的读数约是 512，那是黑电平：没有光，读数也不为 0。</p>
+  </section>
+  <section class="cap" data-in="0.905" data-out="0.935">
+    <h2>按位置排回去</h2>
+    <p>是一张马赛克。每个点只有一个通道的亮度，颜色还不存在。</p>
+  </section>
+  <section class="cap" data-in="0.94" data-out="0.962">
+    <h2>整张 RAW</h2>
+    <p>直接显示，只有灰度：没有颜色，亮暗也不对，还不像一张照片。</p>
+  </section>
+  <section class="cap end" data-in="0.972" data-out="2">
+    <h2>然后，才是照片</h2>
+    <p>去马赛克、白平衡、色彩矩阵、色调曲线……相机的"创意外观"就在这一段。<br>下一段旅程：<a href="https://github.com/751K/sony-a7m5-looks" target="_blank" rel="noopener">sony-a7m5-looks</a></p>
+  </section>
+</div>
+<div id="bar"></div>
+<div id="loading">LOADING</div>
+
+<script type="module">
+import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+
+const RAW = await (await fetch("assets/raw.json")).json();
+
+/* ---------- helpers ---------- */
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const seg = (p, a, b) => clamp01((p - a) / (b - a));
+const ease = (t) => t * t * (3 - 2 * t);
+const eio = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const lerp = (a, b, t) => a + (b - a) * t;
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+let seed = 7;
+const rnd = (a = 0, b = 1) => { seed = (seed * 16807) % 2147483647; return a + (b - a) * ((seed - 1) / 2147483646); };
+function fadeable(obj) {
+  obj.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.transparent = true; m.userData.base = m.opacity; }); });
+  return obj;
+}
+function setOpacity(obj, a) {
+  obj.visible = a > 0.002;
+  obj.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.opacity = (m.userData.base ?? 1) * a; m.depthWrite = a > 0.98; }); });
+}
+
+/* ---------- renderer ---------- */
+const canvas = document.getElementById("gl");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const view = new THREE.PerspectiveCamera(45, 1, 0.01, 600);
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envTex = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const loader = new THREE.TextureLoader();
+const tex = (u) => { const t = loader.load(u); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t; };
+const photoTex = tex("assets/final.jpg");
+const bayerTex = tex("assets/raw_bayer.png");
+bayerTex.magFilter = THREE.NearestFilter;
+
+/* =========================================================
+   WORLD: canal, houses, person, camera
+   ========================================================= */
+const world = new THREE.Scene();
+world.fog = new THREE.FogExp2(0x061633, 0.006);
+
+const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: { top: { value: new THREE.Color(0x01040f) }, mid: { value: new THREE.Color(0x0a2a78) }, hor: { value: new THREE.Color(0x3a63b8) } },
+  vertexShader: "varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }",
+  fragmentShader: "uniform vec3 top, mid, hor; varying vec3 vP; void main(){ float h = vP.y; vec3 c = h < 0.06 ? mix(hor*0.6, hor, smoothstep(-0.05,0.06,h)) : mix(hor, mid, smoothstep(0.06,0.28,h)); c = mix(c, top, smoothstep(0.28,0.85,h)); gl_FragColor = vec4(c,1.); }",
+}));
+world.add(sky);
+world.add(new THREE.HemisphereLight(0x4a68c0, 0x05070c, 0.4));
+const moonLight = new THREE.DirectionalLight(0x9db7ff, 0.35); moonLight.position.set(30, 40, 20); world.add(moonLight);
+const moon = new THREE.Mesh(new THREE.SphereGeometry(1.4, 24, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xfff6e0).multiplyScalar(2.2), fog: false }));
+moon.position.set(70, 62, -160); world.add(moon);
+
+const city = new THREE.Group(); world.add(city);
+const QUAY = 1.2, FRONT = -19.5;
+const palette = [0x3b2a22, 0x5a3524, 0x26272b, 0x6b5a4a, 0xcfcabd, 0x47352c, 0x1d2731, 0x7a4b33, 0x2f3f3a];
+const warm = [0xffcf7a, 0xffb35c, 0xfff0c8, 0xffd99a];
+function buildCity(target, mirrored) {
+  const g = new THREE.Group();
+  const quay = new THREE.Mesh(new THREE.BoxGeometry(110, QUAY, 3), new THREE.MeshStandardMaterial({ color: 0x23262c, roughness: 0.9 }));
+  quay.position.set(0, QUAY / 2, FRONT + 1.5); g.add(quay);
+  const street = new THREE.Mesh(new THREE.BoxGeometry(110, 0.1, 2.5), new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 1 }));
+  street.position.set(0, QUAY, FRONT + 1.25); g.add(street);
+  const winGeo = new THREE.PlaneGeometry(0.55, 0.95);
+  const wins = []; seed = 7;
+  let x = -46;
+  while (x < 46) {
+    const w = rnd(3.1, 4.8), h = rnd(9, 15.5), col = palette[Math.floor(rnd(0, palette.length))];
+    const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.85 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, 6), mat);
+    body.position.set(x + w / 2, QUAY + h / 2, FRONT - 3); g.add(body);
+    const s = new THREE.Shape(), kind = Math.floor(rnd(0, 3)), gh = rnd(1.6, 3.2);
+    if (kind === 0) { s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(0, gh); }
+    else if (kind === 1) { const st = 3; s.moveTo(-w / 2, 0); for (let i = 0; i < st; i++) { const xx = -w / 2 + (i * w) / (2 * st), yy = (gh * (i + 1)) / st; s.lineTo(xx, yy); s.lineTo(xx + w / (2 * st), yy); } for (let i = st - 1; i >= 0; i--) { const xx = w / 2 - (i * w) / (2 * st) - w / (2 * st), yy = (gh * (i + 1)) / st; s.lineTo(xx, yy); s.lineTo(xx + w / (2 * st), yy); } s.lineTo(w / 2, 0); }
+    else { s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(w / 2 - 0.4, gh * 0.55); s.quadraticCurveTo(w * 0.25, gh * 0.9, 0, gh); s.quadraticCurveTo(-w * 0.25, gh * 0.9, -w / 2 + 0.4, gh * 0.55); }
+    const gable = new THREE.Mesh(new THREE.ExtrudeGeometry(s, { depth: 6, bevelEnabled: false }), mat);
+    gable.position.set(x + w / 2, QUAY + h, FRONT - 6); g.add(gable);
+    const cols = Math.max(2, Math.floor(w / 1.15));
+    for (let fy = QUAY + 1.4; fy < QUAY + h - 0.9; fy += 1.75)
+      for (let c = 0; c < cols; c++) {
+        const wx = x + (w / cols) * (c + 0.5), lit = rnd() < 0.42;
+        const color = lit ? new THREE.Color(warm[Math.floor(rnd(0, warm.length))]).multiplyScalar(rnd(1.1, 2.2) * (mirrored ? 0.45 : 1)) : new THREE.Color(0x0b1422);
+        wins.push([wx, fy, color]);
+      }
+    x += w + rnd(0, 0.15);
+  }
+  const winMesh = new THREE.InstancedMesh(winGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }), wins.length);
+  const m4 = new THREE.Matrix4();
+  wins.forEach(([wx, wy, c], i) => { m4.makeTranslation(wx, wy, FRONT + 0.02); winMesh.setMatrixAt(i, m4); winMesh.setColorAt(i, c); });
+  g.add(winMesh);
+  // street lamps along the far quay
+  for (let lx = -40; lx <= 40; lx += 11) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 3.6, 8), new THREE.MeshStandardMaterial({ color: 0x111317 }));
+    pole.position.set(lx, QUAY + 1.8, FRONT + 2.2); g.add(pole);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd08a).multiplyScalar(4), fog: false }));
+    bulb.position.set(lx, QUAY + 3.7, FRONT + 2.2); g.add(bulb);
+  }
+  // the orange boat on the right
+  const hull = new THREE.Mesh(new RoundedBoxGeometry(9, 1.2, 2.6, 3, 0.4), new THREE.MeshStandardMaterial({ color: 0xc2410c, roughness: 0.6 }));
+  hull.position.set(15, 0.55, FRONT + 5.5); g.add(hull);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(5, 0.9, 2), new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: 0.7 }));
+  cabin.position.set(14.5, 1.55, FRONT + 5.5); g.add(cabin);
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 0.4), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffa94d).multiplyScalar(2.4), fog: false }));
+  glow.position.set(14.5, 1.6, FRONT + 6.51); g.add(glow);
+  if (mirrored) { g.scale.y = -1.1; g.traverse((o) => { if (o.material) { o.material = o.material.clone(); o.material.side = THREE.DoubleSide; } }); }
+  target.add(g);
+  return g;
+}
+buildCity(city, false);
+buildCity(city, true);
+const water = new THREE.Mesh(new THREE.PlaneGeometry(400, 60), new THREE.MeshBasicMaterial({ color: 0x040b18, transparent: true, opacity: 0.8 }));
+water.rotation.x = -Math.PI / 2; water.position.set(0, 0.01, -4); world.add(water);
+
+/* near bank: where the photographer stands */
+const near = new THREE.Group(); world.add(near);
+const nearQuay = new THREE.Mesh(new THREE.BoxGeometry(120, QUAY, 14), new THREE.MeshStandardMaterial({ color: 0x1c1f25, roughness: 0.95 }));
+nearQuay.position.set(0, QUAY / 2, 16); near.add(nearQuay);
+const railMat = new THREE.MeshStandardMaterial({ color: 0x0e1014, roughness: 0.5, metalness: 0.4 });
+const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 120, 8), railMat);
+rail.rotation.z = Math.PI / 2; rail.position.set(0, QUAY + 1.0, 9.3); near.add(rail);
+for (let rx = -40; rx <= 40; rx += 2.2) { const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.0, 6), railMat); post.position.set(rx, QUAY + 0.5, 9.3); near.add(post); }
+const lampN = new THREE.PointLight(0xffc78a, 6, 14, 1.6); lampN.position.set(5.5, QUAY + 4, 12); near.add(lampN);
+const lampBulb = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd08a).multiplyScalar(4) }));
+lampBulb.position.copy(lampN.position); near.add(lampBulb);
+const lampPole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 4, 8), railMat); lampPole.position.set(5.5, QUAY + 2, 12); near.add(lampPole);
+const rim = new THREE.DirectionalLight(0x8fb4ff, 0.8); rim.position.set(-6, 6, -4); world.add(rim);
+
+/* person (abstract clay figure) */
+const P = V(1.6, QUAY, 10.6);              // feet
+const CAM = V(1.6, QUAY + 1.6, 10.28);     // camera centre
+const clay = new THREE.MeshStandardMaterial({ color: 0xe9e6df, roughness: 0.55, envMap: envTex, envMapIntensity: 0.25 });
+const person = new THREE.Group(); world.add(person);
+function limb(a, b, r) {
+  const d = new THREE.Vector3().subVectors(b, a), len = d.length();
+  const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.01, len - 2 * r), 6, 12), clay);
+  m.position.copy(a).addScaledVector(d, 0.5);
+  m.quaternion.setFromUnitVectors(V(0, 1, 0), d.normalize());
+  person.add(m); return m;
+}
+const hip = V(P.x, QUAY + 0.95, P.z), neck = V(P.x, QUAY + 1.47, P.z + 0.02);
+limb(V(P.x - 0.1, QUAY + 0.06, P.z), V(P.x - 0.1, hip.y, P.z), 0.075);
+limb(V(P.x + 0.1, QUAY + 0.06, P.z), V(P.x + 0.1, hip.y, P.z), 0.075);
+limb(V(P.x, hip.y + 0.02, P.z), neck, 0.17);
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 24, 16), clay); head.position.set(P.x, QUAY + 1.64, P.z + 0.03); person.add(head);
+const shL = V(P.x - 0.2, QUAY + 1.42, P.z), shR = V(P.x + 0.2, QUAY + 1.42, P.z);
+const elL = V(P.x - 0.26, QUAY + 1.28, P.z - 0.18), elR = V(P.x + 0.27, QUAY + 1.3, P.z - 0.16);
+limb(shL, elL, 0.05); limb(elL, V(CAM.x - 0.09, CAM.y - 0.04, CAM.z + 0.03), 0.045);
+limb(shR, elR, 0.05); limb(elR, V(CAM.x + 0.11, CAM.y - 0.02, CAM.z + 0.02), 0.045);
+fadeable(person);
+
+/* the camera */
+const camBody = new THREE.Group(); camBody.position.copy(CAM); camBody.scale.setScalar(1.5); world.add(camBody);
+const black = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.45, metalness: 0.2, envMap: envTex, envMapIntensity: 0.6 });
+const body = new THREE.Mesh(new RoundedBoxGeometry(0.135, 0.09, 0.05, 4, 0.01), black); camBody.add(body);
+const grip = new THREE.Mesh(new RoundedBoxGeometry(0.035, 0.085, 0.05, 4, 0.012), black); grip.position.set(0.052, -0.003, -0.022); camBody.add(grip);
+const evf = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.03, 0.05, 3, 0.006), black); evf.position.set(0, 0.052, 0.002); camBody.add(evf);
+const lensParts = [[0.032, 0.03, -0.04], [0.034, 0.05, -0.08], [0.036, 0.03, -0.12]];
+lensParts.forEach(([r, l, z]) => { const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, l, 40), black); c.rotation.x = Math.PI / 2; c.position.set(0, -0.004, z); camBody.add(c); });
+const glass = new THREE.Mesh(new THREE.CircleGeometry(0.029, 40), new THREE.MeshPhysicalMaterial({ color: 0x0a1630, roughness: 0.05, metalness: 0.9, envMap: envTex, envMapIntensity: 1.4, clearcoat: 1 }));
+glass.position.set(0, -0.004, -0.1355); glass.rotation.y = Math.PI; camBody.add(glass);
+const shutter = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.006, 20), new THREE.MeshStandardMaterial({ color: 0x8a8d93, metalness: 0.8, roughness: 0.3, envMap: envTex }));
+shutter.position.set(0.052, 0.048, -0.02); camBody.add(shutter);
+const lcd = new THREE.Mesh(new THREE.PlaneGeometry(0.075, 0.05), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true }));
+lcd.position.set(-0.012, -0.008, 0.0255); camBody.add(lcd);
+const sensorW = new THREE.Mesh(new THREE.PlaneGeometry(0.036, 0.024), new THREE.MeshBasicMaterial({ map: photoTex, transparent: true, opacity: 0, side: THREE.DoubleSide, toneMapped: false }));
+sensorW.position.set(0, -0.004, 0.004); camBody.add(sensorW);
+const camShell = [body, grip, evf, ...camBody.children.filter((c) => c.geometry?.type === "CylinderGeometry" && c !== shutter)];
+camShell.forEach((m) => { m.material = m.material.clone(); m.material.transparent = true; });
+
+/* light funnel into the lens */
+const funnel = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 48, 1, true), new THREE.MeshBasicMaterial({ color: 0x9fbaff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }));
+world.add(funnel);
+const LENS = CAM.clone().add(V(0, -0.006, -0.21));
+
+/* =========================================================
+   LAB: sensor chip, pixel stack, ADC
+   ========================================================= */
+const lab = new THREE.Scene();
+lab.background = new THREE.Color(0x000000);
+lab.environment = envTex; lab.environmentIntensity = 0.5;
+const key = new THREE.SpotLight(0xffffff, 28, 30, 0.6, 0.6); key.position.set(4, 8, 6); lab.add(key);
+lab.add(new THREE.AmbientLight(0x334466, 0.6));
+const back = new THREE.DirectionalLight(0x8fb4ff, 1.4); back.position.set(-5, 3, -6); lab.add(back);
+
+const chip = new THREE.Group(); lab.add(chip);
+const ceramic = new THREE.MeshStandardMaterial({ color: 0x2b2c31, roughness: 0.55, metalness: 0.1 });
+const gold = new THREE.MeshStandardMaterial({ color: 0xd4a64a, roughness: 0.25, metalness: 1 });
+const pkg = new THREE.Mesh(new RoundedBoxGeometry(5.6, 0.36, 4.3, 4, 0.06), ceramic); pkg.position.y = -0.2; chip.add(pkg);
+const goldFrame = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.04, 3.05), gold); chip.add(goldFrame);
+const dieBase = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.06, 2.75), new THREE.MeshStandardMaterial({ color: 0x111216, roughness: 0.3, metalness: 0.6 })); dieBase.position.y = 0.04; chip.add(dieBase);
+const dieMat = new THREE.MeshBasicMaterial({ map: photoTex, toneMapped: false, transparent: true });
+const die = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.4), dieMat); die.rotation.x = -Math.PI / 2; die.position.y = 0.075; chip.add(die);
+const dieMat2 = new THREE.MeshBasicMaterial({ map: bayerTex, toneMapped: false, transparent: true, opacity: 0 });
+const die2 = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.4), dieMat2); die2.rotation.x = -Math.PI / 2; die2.position.y = 0.077; chip.add(die2);
+for (let i = 0; i < 26; i++) {
+  const t = -2.5 + (5 * i) / 25;
+  [[t, 2.12], [t, -2.12]].forEach(([x, z]) => { const pin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.16), gold); pin.position.set(x, -0.39, z); chip.add(pin); });
+}
+for (let i = 0; i < 20; i++) {
+  const t = -1.9 + (3.8 * i) / 19;
+  [[2.77, t], [-2.77, t]].forEach(([x, z]) => { const pin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 0.08), gold); pin.position.set(x, -0.39, z); chip.add(pin); });
+}
+fadeable(chip);
+dieMat2.userData.base = 1;
+
+/* 8x8 pixel stack with real raw values */
+const N = 8, PITCH = 0.42;
+const px = new THREE.Group(); lab.add(px);
+const vals = RAW.wells.flat();
+const vmax = Math.max(...vals) - RAW.black;
+const filt = (r, c) => ((r + RAW.origin[1]) % 2 === 0 ? ((c + RAW.origin[0]) % 2 === 0 ? 0 : 1) : ((c + RAW.origin[0]) % 2 === 0 ? 1 : 2));
+const FCOL = [new THREE.Color(0xff3b2f), new THREE.Color(0x2fd158), new THREE.Color(0x2f6bff)];
+const mk = (geo, mat) => new THREE.InstancedMesh(geo, mat, N * N);
+const silicon = mk(new THREE.BoxGeometry(0.4, 0.7, 0.4), new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.25, metalness: 0.2, transparent: true, opacity: 0.42 }));
+const filters = mk(new THREE.BoxGeometry(0.39, 0.09, 0.39), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0, transparent: true, opacity: 0.92, envMapIntensity: 0.3 }));
+const lenses = mk(new THREE.SphereGeometry(0.19, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshPhysicalMaterial({ color: 0xdfe8ff, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.22, clearcoat: 1, envMapIntensity: 0.5 }));
+const wells = mk(new THREE.BoxGeometry(0.26, 1, 0.26), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, transparent: true }));
+[silicon, filters, lenses, wells].forEach((m) => px.add(m));
+const pxPos = [];
+for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+  const i = r * N + c, x = (c - (N - 1) / 2) * PITCH, z = (r - (N - 1) / 2) * PITCH;
+  pxPos.push(V(x, 0, z));
+  const m = new THREE.Matrix4();
+  m.makeTranslation(x, -0.35, z); silicon.setMatrixAt(i, m);
+  m.makeTranslation(x, 0.045, z); filters.setMatrixAt(i, m); filters.setColorAt(i, FCOL[filt(r, c)]);
+  m.makeTranslation(x, 0.09, z); lenses.setMatrixAt(i, m);
+  wells.setColorAt(i, FCOL[filt(r, c)].clone().multiplyScalar(1.8));
+}
+fadeable(px);
+const wellLevel = new Float32Array(N * N);
+function setWells(fill, drainedRows = -1, drainT = 0) {
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < N * N; i++) {
+    const r = Math.floor(i / N);
+    let f = fill * clamp01((vals[i] - RAW.black) / vmax);
+    if (r < drainedRows) f = 0; else if (r === drainedRows) f *= 1 - drainT;
+    wellLevel[i] = f;
+    const h = Math.max(0.001, f * 0.62);
+    m.makeScale(1, h, 1); m.setPosition(pxPos[i].x, -0.69 + h / 2, pxPos[i].z);
+    wells.setMatrixAt(i, m);
+  }
+  wells.instanceMatrix.needsUpdate = true;
+}
+setWells(0);
+
+/* photons */
+const dotTex = (() => { const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d"); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.35, "rgba(255,255,255,.6)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
+const NPH = 900;
+const phGeo = new THREE.BufferGeometry();
+const phPos = new Float32Array(NPH * 3), phCol = new Float32Array(NPH * 3), phSeed = [];
+for (let k = 0; k < NPH; k++) {
+  // more photons where the pixel collected more light
+  let i; do { i = Math.floor(rnd(0, N * N)); } while (rnd() > 0.15 + 0.85 * (vals[i] - RAW.black) / vmax);
+  const c = FCOL[filt(Math.floor(i / N), i % N)];
+  phSeed.push([i, rnd(), rnd(-0.08, 0.08), rnd(-0.08, 0.08), c]);
+}
+phGeo.setAttribute("position", new THREE.BufferAttribute(phPos, 3));
+phGeo.setAttribute("color", new THREE.BufferAttribute(phCol, 3));
+const photons = new THREE.Points(phGeo, new THREE.PointsMaterial({ size: 0.05, map: dotTex, alphaTest: 0.01, vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+lab.add(photons);
+function updatePhotons(t, a) {
+  photons.visible = a > 0.01; photons.material.opacity = a;
+  if (!photons.visible) return;
+  phSeed.forEach(([i, s, ox, oz, c], k) => {
+    const ph = (t * 0.55 + s) % 1, p = pxPos[i];
+    const y = lerp(3.2, -0.2, ph);
+    const spread = clamp01((y - 0.1) / 3) * 0.5;
+    phPos[k * 3] = p.x + ox * (1 + spread * 6); phPos[k * 3 + 1] = y; phPos[k * 3 + 2] = p.z + oz * (1 + spread * 6);
+    const below = y < 0.05; // after the filter only its colour survives
+    const col = below ? c : new THREE.Color(1, 1, 1);
+    const f = below ? clamp01(1 - (0.05 - y) / 0.25) * 1.4 : 0.4 * clamp01((1.9 - y) / 0.9);
+    phCol[k * 3] = col.r * f; phCol[k * 3 + 1] = col.g * f; phCol[k * 3 + 2] = col.b * f;
+  });
+  phGeo.attributes.position.needsUpdate = true; phGeo.attributes.color.needsUpdate = true;
+}
+
+/* ADC block + bus */
+function labelTex(text, w = 256, h = 128, font = "700 64px 'JetBrains Mono', monospace", color = "#e8eefc") {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d"); g.fillStyle = color; g.font = font; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, w / 2, h / 2);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const adc = new THREE.Group(); lab.add(adc);
+const adcBox = new THREE.Mesh(new RoundedBoxGeometry(0.7, 0.4, N * PITCH + 0.2, 3, 0.05), new THREE.MeshStandardMaterial({ color: 0x23252b, roughness: 0.35, metalness: 0.6 }));
+adcBox.position.set(N * PITCH / 2 + 0.75, -0.3, 0); adc.add(adcBox);
+const adcLabel = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.3), new THREE.MeshBasicMaterial({ map: labelTex("ADC"), transparent: true, toneMapped: false }));
+adcLabel.rotation.x = -Math.PI / 2; adcLabel.position.set(adcBox.position.x, -0.09, 0); adc.add(adcLabel);
+const busMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x8fb4ff).multiplyScalar(1.5), transparent: true, toneMapped: false });
+const buses = [];
+for (let r = 0; r < N; r++) {
+  const b = new THREE.Mesh(new THREE.BoxGeometry(N * PITCH + 0.5, 0.012, 0.02), busMat.clone());
+  b.position.set(0.25, -0.05, (r - (N - 1) / 2) * PITCH + 0.2); adc.add(b); buses.push(b);
+}
+fadeable(adc);
+const sprites = vals.map((v, i) => {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTex(String(v), 256, 96, "600 60px 'JetBrains Mono', monospace", "#ffffff"), transparent: true, depthTest: false, toneMapped: false }));
+  s.scale.set(0.62, 0.23, 1); s.visible = false; lab.add(s); return s;
+});
+
+/* =========================================================
+   CAMERA PATHS
+   ========================================================= */
+const WORLD_KEYS = [
+  [0.00, V(-2, 5.5, 2), V(0, 6.5, -20)],
+  [0.10, V(-7, 4.2, 5), V(1, 6, -20)],
+  [0.20, V(5.2, 2.55, 11.4), V(1.5, 2.3, 10.2)],
+  [0.27, V(4.0, 2.7, 11.0), V(1.5, 2.55, 10.1)],
+  [0.31, V(2.9, 2.95, 10.25), V(1.35, 2.8, 9.9)],
+  [0.36, V(2.55, 2.92, 10.05), V(1.25, 2.79, 9.95)],
+  [0.385, V(1.75, 2.86, 10.85), V(1.59, 2.79, 10.28)],
+  [0.405, V(1.582, 2.788, 10.395), V(1.582, 2.788, 10.3)],
+  [0.44, V(1.582, 2.788, 10.37), V(1.582, 2.788, 10.3)],
+];
+const LAB_KEYS = [
+  [0.44, V(0, 9, 7.5), V(0, 0, 0)],
+  [0.52, V(-4.4, 3.6, 5.6), V(0, 0, 0)],
+  [0.57, V(-1.3, 1.6, 2.2), V(0, 0, 0)],
+  [0.64, V(2.1, 1.75, 2.6), V(0, -0.1, 0)],
+  [0.72, V(2.6, 2.4, 3.2), V(0.2, -0.2, 0)],
+  [0.76, V(1.1, 4.4, 2.6), V(0.85, -0.2, 0)],
+  [0.84, V(1.0, 4.9, 1.6), V(0.9, -0.2, 0)],
+  [0.90, V(0.6, 6.5, 0.9), V(0.6, -0.2, 0)],
+];
+function pathAt(keys, p) {
+  if (p <= keys[0][0]) return [keys[0][1].clone(), keys[0][2].clone()];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const [p0, a0, t0] = keys[i], [p1, a1, t1] = keys[i + 1];
+    if (p <= p1) { const t = eio(seg(p, p0, p1)); return [a0.clone().lerp(a1, t), t0.clone().lerp(t1, t)]; }
+  }
+  const k = keys[keys.length - 1]; return [k[1].clone(), k[2].clone()];
+}
+
+/* =========================================================
+   POST + LOOP
+   ========================================================= */
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(world, view);
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.35, 0.92);
+composer.addPass(renderPass); composer.addPass(bloom); composer.addPass(new OutputPass());
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false); composer.setSize(w, h); bloom.setSize(w, h);
+  view.aspect = w / h; view.fov = w / h < 0.8 ? 68 : w / h < 1.2 ? 55 : 42; view.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+const caps = [...document.querySelectorAll(".cap")].map((el) => ({ el, a: +el.dataset.in, b: +el.dataset.out }));
+const $ = (id) => document.getElementById(id);
+const imgBayer = $("img-bayer"), imgRaw = $("img-raw"), imgFinal = $("img-final"), flash = $("flash"), fade = $("fade"), bar = $("bar");
+// number table: 16 x 16 real values around the wells
+const numbers = $("numbers");
+const numCells = [];
+for (let r = 0; r < 16; r++) for (let c = 0; c < 16; c++) {
+  const v = RAW.grid[r + 8][c + 8], s = document.createElement("span");
+  const f = filt(r + 8 - 8, c + 8 - 8);
+  s.textContent = v; s.className = ["r", "g", "b"][f] + (c >= 8 ? " wide" : "");
+  numbers.appendChild(s); numCells.push([r, s]);
+}
+
+let target = 0, cur = 0, t0 = performance.now();
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function readScroll() { const max = document.documentElement.scrollHeight - innerHeight; target = max > 0 ? scrollY / max : 0; }
+addEventListener("scroll", readScroll, { passive: true }); readScroll(); cur = target;
+
+let frozen = false;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!frozen) draw(now);
+}
+function draw(now, fixed) {
+  cur = fixed ?? cur + (target - cur) * (reduce ? 1 : 0.085);
+  const p = cur, t = (now - t0) / 1000;
+  bar.style.width = (p * 100).toFixed(2) + "%";
+
+  // captions
+  caps.forEach(({ el, a, b }) => {
+    const span = b - a, fin = Math.min(0.02, span * 0.3);
+    const o = a < 0 ? 1 - seg(p, b - fin, b) : Math.min(seg(p, a, a + fin), 1 - seg(p, b - fin, b));
+    el.style.opacity = o.toFixed(3); el.style.transform = `translateY(${((1 - o) * (p < a + fin ? 24 : -24)).toFixed(1)}px)`;
+  });
+
+  const inLab = p >= 0.44;
+  renderPass.scene = inLab ? lab : world;
+  bloom.strength = inLab ? 0.28 : 0.55;
+  // black dip across the scene cut
+  fade.style.opacity = (Math.max(seg(p, 0.405, 0.44) * (p < 0.44 ? 1 : 0), p >= 0.44 ? 1 - seg(p, 0.44, 0.47) : 0)).toFixed(3);
+
+  if (!inLab) {
+    // black first; a faint glimmer on load, then the canal rises as you scroll
+    const glimmer = 0.1 * ease(clamp01((t - 0.6) / 2.5));
+    renderer.toneMappingExposure = lerp(glimmer, 1.0, ease(seg(p, 0.012, 0.085)));
+    const [pos, tgt] = pathAt(WORLD_KEYS, p);
+    if (view.aspect < 1 && p > 0.15) pos.sub(tgt).multiplyScalar(lerp(lerp(1.45, 1.1, clamp01(view.aspect)), 1, seg(p, 0.36, 0.385))).add(tgt);
+    // tiny hand-held drift
+    pos.x += Math.sin(t * 0.4) * 0.03 * (1 - seg(p, 0.3, 0.4)); pos.y += Math.sin(t * 0.33) * 0.02 * (1 - seg(p, 0.3, 0.4));
+    view.position.copy(pos); view.lookAt(tgt);
+    // shutter press + flash
+    const press = seg(p, 0.245, 0.255) - seg(p, 0.262, 0.272);
+    shutter.position.y = 0.048 - 0.0025 * press;
+    flash.style.opacity = (Math.max(0, 1 - Math.abs(p - 0.257) / 0.01) * 0.85).toFixed(3);
+    lcd.material = p > 0.258 ? (lcd.userData.on ||= new THREE.MeshBasicMaterial({ map: photoTex, toneMapped: false, transparent: true })) : (lcd.userData.off ||= lcd.material);
+    lcd.material.opacity = 1;
+    // person fades as we pass through to the camera
+    setOpacity(person, 1 - seg(p, 0.285, 0.325));
+    // the city collapses into the lens
+    const s = 1 - ease(seg(p, 0.305, 0.375));
+    const sc = Math.max(0.0005, Math.pow(s, 2.2));
+    city.scale.setScalar(sc); city.position.copy(LENS).multiplyScalar(1 - sc);
+    near.visible = sc > 0.02; setOpacity(near, 1);
+    funnel.material.opacity = 0;
+    funnel.visible = funnel.material.opacity > 0.002;
+    { const d = new THREE.Vector3(0, 6, -20).multiplyScalar(sc).add(city.position).sub(LENS); const L = d.length();
+      funnel.position.copy(LENS).addScaledVector(d, 0.5); funnel.scale.set(L * 0.35 + 0.01, L, L * 0.35 + 0.01);
+      funnel.quaternion.setFromUnitVectors(V(0, -1, 0), d.clone().normalize()); }
+    // camera shell turns to glass, sensor image shows
+    const ghost = 0;
+    camShell.forEach((m) => { m.material.opacity = 1 - 0.85 * ghost; m.material.depthWrite = ghost < 0.5; });
+    sensorW.material.opacity = 0;
+    sky.material.uniforms.top.value.setHex(0x01040f);
+    world.fog.density = 0.006 * sc + 0.0001;
+  } else {
+    renderer.toneMappingExposure = 1.0;
+    const [pos, tgt] = pathAt(LAB_KEYS, p);
+    if (view.aspect < 1) pos.sub(tgt).multiplyScalar(lerp(1.5, 1.15, clamp01(view.aspect))).add(tgt);
+    view.position.copy(pos); view.lookAt(tgt);
+    // chip -> mosaic -> pixel stack
+    chip.rotation.y = lerp(-0.5, 0, ease(seg(p, 0.44, 0.55)));
+    dieMat2.opacity = seg(p, 0.52, 0.565);
+    const showPx = ease(seg(p, 0.57, 0.6));
+    setOpacity(chip, 1 - showPx);
+    setOpacity(px, showPx);
+    px.position.y = lerp(-0.6, 0, showPx);
+    lenses.material.opacity = 0.22 * showPx * (1 - 0.85 * seg(p, 0.62, 0.66));
+    filters.material.opacity = 0.92 * showPx * (1 - 0.7 * seg(p, 0.62, 0.66));
+    silicon.material.opacity = 0.42 * showPx;
+    // photons fill the wells
+    const fill = ease(seg(p, 0.625, 0.71));
+    updatePhotons(t, Math.min(seg(p, 0.6, 0.63), 1 - seg(p, 0.71, 0.74)));
+    // readout row by row
+    const ro = seg(p, 0.765, 0.84) * N;
+    const row = Math.floor(ro), rt = ro - row;
+    setWells(fill, p > 0.765 ? row : -1, p > 0.765 ? ease(clamp01(rt * 1.6)) : 0);
+    setOpacity(adc, seg(p, 0.735, 0.765) * (1 - seg(p, 0.86, 0.88)));
+    buses.forEach((b, r) => { b.material.opacity = adc.visible ? (r === row && p > 0.765 && p < 0.84 ? 1 : 0.12) * seg(p, 0.735, 0.765) : 0; });
+    sprites.forEach((s, i) => {
+      const r = Math.floor(i / N), c = i % N;
+      const k = p > 0.765 && p < 0.86 ? clamp01((ro - r) * 1.15) : 0;
+      s.visible = k > 0 && k < 1 && c % 2 === 0;
+      if (!s.visible) return;
+      const a = pxPos[i], e = ease(k);
+      s.position.set(lerp(a.x, adcBox.position.x + 1.05, e), 0.35 + 0.35 * Math.sin(Math.PI * e), lerp(a.z, (c / 2 - 1.5) * 0.34, e));
+      s.material.opacity = Math.min(1, k * 4) * (1 - seg(k, 0.85, 1));
+    });
+    px.visible = px.visible && p < 0.9;
+  }
+
+  // RAW numbers table, then the 2D images
+  const nt = seg(p, 0.858, 0.89);
+  numbers.style.opacity = (Math.min(seg(p, 0.85, 0.862), 1 - seg(p, 0.897, 0.905))).toFixed(3);
+  numCells.forEach(([r, s]) => s.classList.toggle("on", nt * 16 > r));
+  imgBayer.style.opacity = Math.min(seg(p, 0.898, 0.91), 1 - seg(p, 0.935, 0.945)).toFixed(3);
+  imgBayer.style.transform = `scale(${lerp(1.35, 1, ease(seg(p, 0.9, 0.94)))})`;
+  imgRaw.style.opacity = Math.min(seg(p, 0.935, 0.945), 1 - seg(p, 0.962, 0.972)).toFixed(3);
+  imgFinal.style.opacity = seg(p, 0.962, 0.975).toFixed(3);
+  canvas.style.opacity = (1 - seg(p, 0.838, 0.852)).toFixed(3);
+  if (+canvas.style.opacity > 0) composer.render();
+}
+requestAnimationFrame(frame);
+$("loading").style.opacity = 0;
+setTimeout(() => $("loading").remove(), 700);
+</script>
+</body>
+</html>
