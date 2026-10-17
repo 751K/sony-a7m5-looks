@@ -149,6 +149,33 @@ def strength(dev224, dec):
     return f32(f)
 
 
+def _strength_470(scale, level, tab, maxlvl):
+    """FUN_100129470: 10-step table interpolation used when the decoder's
+    +0x22780 / +0x22784 floats are not 1.0.
+
+    `tab(i)` reads the raw u16 entry (the assembly reads past index 9 into the
+    next table, so this is a raw read, not the extrapolation used by the 1.0
+    path).  `maxlvl` is ZcARW+0x1b0 (decoder d1b0).
+    """
+    scale = f32(scale)
+    level = int(level)
+    if maxlvl < level:
+        k = maxlvl // 10
+        f1 = f32(tab(9))                     # ldr h1, [x2, #0x12]
+        u4, u3 = 10, maxlvl
+    else:
+        k = level // 10
+        u4, u3 = k + 1, level
+        f1 = f32(f32(tab(u4)) * scale)       # fmul s1, s1, s0
+    f2 = f32(tab(k))
+    frac = f32(level - (u3 // 10) * 10)      # madd with -10
+    den = f32(f32(u4 - u3 // 10) * f32(10.0))
+    s = fma32(f32(-f2), scale, f1)           # fmsub s1, s2, s0, s1 = f1 - f2*scale
+    s = f32(s * frac)                        # fmul  s1, s1, s3
+    s = f32(s / den)                         # fdiv  s1, s1, s4
+    return f32(fma32(f2, scale, s))          # fmadd s0, s2, s0, s1
+
+
 def to_ycc(r, g, b):
     R, G, B = (np.asarray(p, np.int64) for p in (r, g, b))
     y = np.minimum((R * 0xb44 + G * 0xdc3 + B * 0x271) >> 11, 0xefff) + 0x1000
@@ -288,12 +315,18 @@ def marble(r, g, b, look, dev, dec, region=None, mode=0):
                 return look.u16(base_off + 2 * i)
             return (look.u16(base_off + 0x12) * 2 - look.u16(base_off + 0x10)) & 0xffffffff
 
-        if dec is None or dec["f22780"] != 1.0 or dec["f22784"] != 1.0:
-            raise NotImplementedError("FUN_100129470 strength branch (decoder +0x22780/+0x22784 != 1.0)")
-        lo, hi = tab(0x1140, q), tab(0x1140, i56)
-        g128 = int(float(E._fma64(float(r10) * 0.1, float(_i32(hi - lo)), float(lo))))
-        lo, hi = tab(0x1154, q), tab(0x1154, i56)
-        g124 = int(float(E._fma64(float(_i32(hi - lo)) * 0.1, float(r10), float(lo))))
+        maxlvl = dec["d1b0"] if dec is not None else 0
+        raw = lambda base, i: look.u16(base + 2 * i)      # no extrapolation here
+        if dec is not None and dec["f22780"] != 1.0:
+            g128 = int(_strength_470(dec["f22780"], lum, lambda i: raw(0x1140, i), maxlvl))
+        else:
+            lo, hi = tab(0x1140, q), tab(0x1140, i56)
+            g128 = int(float(E._fma64(float(r10) * 0.1, float(_i32(hi - lo)), float(lo))))
+        if dec is not None and dec["f22784"] != 1.0:
+            g124 = int(_strength_470(dec["f22784"], lum, lambda i: raw(0x1154, i), maxlvl))
+        else:
+            lo, hi = tab(0x1154, q), tab(0x1154, i56)
+            g124 = int(float(E._fma64(float(_i32(hi - lo)) * 0.1, float(r10), float(lo))))
 
     B = 8 if look.s16(0x109e) == 1 else 4
     ok = True
