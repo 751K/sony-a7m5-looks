@@ -22,6 +22,7 @@ Each profile was rendered from the same ARW and compared with Edit's export of t
 - **Global colour shift:** ΔE₀₀ < 0.4, with chroma difference ΔC* of −0.28 in Capture One and −0.01 in Camera Raw. Neither is visible.
 - **Edges and fine texture:** the remaining differences are here. They come from each program's own demosaicing and sharpening, not from the look.
 - **Synthetic chart:** profile vs. Sony look target is 0.10–0.15 for Capture One and 0.14 for Camera Raw (64³ table).
+- **Coverage:** only ST, FL2 and FL3 have Edit exports to compare against; the other nine looks run through the same verified code with their own data but have not been checked against a Sony rendering. The FL2/FL3 numbers above are for Fade 0, which is what Edit uses for them. Since v1.0.2 the profiles apply the camera's default Fade (FL2/FL3 = 1, IN = 3, SH = 6), which Edit omits for FL2/FL3. That change has not yet been checked against in-camera JPEGs.
 
 ## Installation
 
@@ -69,15 +70,18 @@ Static analysis of Imaging Edge Edit 4.0 shows that the look chain consists of t
 2. **MainGamma**: a per-channel 1D tone curve.
 3. **RGB2YCC**: conversion to luma/colour-difference, with a separate shear and gain in each quadrant of the colour-difference plane. In effect, hue and saturation are adjusted per region.
 4. **ChromaSuppress / AreaComp**: chroma suppression in deep shadows and bright highlights, plus a small adjustment near neutral.
-5. **YGamma**: a luma curve with a highlight knee and an overall gain.
+5. **YGamma**: a luma curve with a highlight knee and an overall gain. The look's Fade setting acts here: any Fade above 0 adds a fixed lift to the shadows and lowers the gain step by step.
 6. **YCC2RGB**: inverse BT.601.
+7. **Effect** (BW and SE only): conversion to monochrome, plus the sepia tint.
 
 Further points:
 
 - The front end only subtracts the black level and applies white-balance gains. There is no camera matrix.
 - The camera writes every look's parameters into the encrypted SR2 data of the ARW. All 12 looks share one implementation.
 - The Python implementation (`sonylook/`) is bit-exact against the original program. This was verified against the output of the original ARM64 code run under emulation.
-- Sharpening, noise reduction and DRO depend on neighbouring pixels, so they are not per-pixel mappings and are left out of the profiles.
+- Each look is rendered with the camera's default Creative Look settings. Contrast, highlights, shadows and saturation are 0 for all twelve; Fade is 1 for FL2/FL3, 3 for IN and 6 for SH.
+- Sharpening, noise reduction, clarity and DRO depend on neighbouring pixels, so they are not per-pixel mappings and are left out of the profiles.
+- Not ported: SSCS, which pulls nearly clipped highlights towards neutral. Edit's 3D LUT and hue/saturation stages are off at default settings.
 
 ### 2. Lookup-table representation
 
@@ -162,7 +166,7 @@ Regenerating from DSC03591 reproduces the files in `profiles/` byte for byte.
 | --- | --- |
 | `profiles/` | Generated profiles: Capture One ICC; Camera Raw DCP and XMP |
 | `chart/` | Synthetic chart: `SonyChart.ARW` (opens in Capture One and Camera Raw), patch definitions `SonyChart.json`, preview image |
-| `sonylook/` | Python port of Sony's look chain and front end, ARW and Edit readers. Also ports of DRO, sharpening / Spica and lens geometry correction, which the profiles do not use |
+| `sonylook/` | Python port of Sony's look chain and front end, ARW and Edit readers. Also ports of RawNR, DRO, sharpening / Spica, Marble, lens geometry correction (none used by the profiles) and the BW/SE Effect stage (used) |
 | `capture_one/` | Capture One profile generation, synthetic chart, measurement and comparison |
 | `camera_raw/` | Camera Raw table format, DCP read/write, profile generation, measurement and comparison |
 | `docs/` | Research notes in Chinese: pipeline details and the calibration of Capture One and Camera Raw. Evidence files and test exports mentioned there are not included |
