@@ -31,6 +31,7 @@ import sony_ycc_stages as SS    # noqa: E402
 import build_color_table as BT  # noqa: E402
 import decode_780f as D         # noqa: E402
 import sony_effect as EF        # noqa: E402
+import sony_sscs as SC          # noqa: E402
 
 CROP = dict(left=12, top=8, width=7008, height=4672)     # Sony default crop (ExifTool)
 MAIN_TAGS = ("0x7841", "0x7847", "0x7848", "0x780b", "0x787e", "0x787f", "0x7880", "0x7881", "0x74c5")
@@ -133,12 +134,17 @@ class Look:
                                          SS.inverse_lut_positive(self.ylut), SS.inverse_lut_centered(self.gamma),
                                          self.gamma[0x8000:], self.ylut)
 
-    def render(self, lin, detail=None, pointwise=False, marble=None):
-        """detail: None, or dict(sharp=sony_detail.sharpness_params(...), spica=(table, params)) to run
+    def render(self, lin, detail=None, pointwise=False, marble=None, sscs=None):
+        """sscs: None, or sony_sscs.params_from_tags(...) to run ZcTaskSSCS first (Edit always runs it, right
+        after GeoCorrection). Integer input uses Sony's u16 path, float input its float32 path.
+        detail: None, or dict(sharp=sony_detail.sharpness_params(...), spica=(table, params)) to run
         ZcTaskSharpness / ZcTaskSpica on the full array (only meaningful at full resolution).
         marble: None, or dict(look=sony_marble.Look, dev=dict(d218, d224, d2c0), dec=...) to run
         ZcTaskMarble after YCC2RGB; the outer 16 px of the array are then not valid."""
         atan, _ = SL.load_static_tables()
+        if sscs is not None:
+            fn = SC.sscs_int if np.issubdtype(np.asarray(lin).dtype, np.integer) else SC.sscs_float
+            lin = np.stack(fn(*(np.ascontiguousarray(lin[..., c]) for c in range(3)), sscs), -1)
         planes = [np.ascontiguousarray(lin[..., c], np.float32) for c in range(3)]
         # pointwise=True: LM16 hue index from the pixel itself instead of the 3-tap row blur
         # (identical on flat areas; needed when the input is a list of colours, e.g. a LUT grid)

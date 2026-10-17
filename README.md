@@ -81,7 +81,7 @@ Further points:
 - The Python implementation (`sonylook/`) is bit-exact against the original program. This was verified against the output of the original ARM64 code run under emulation.
 - Each look is rendered with the camera's default Creative Look settings. Contrast, highlights, shadows and saturation are 0 for all twelve; Fade is 1 for FL2/FL3, 3 for IN and 6 for SH.
 - Sharpening, noise reduction, clarity and DRO depend on neighbouring pixels, so they are not per-pixel mappings and are left out of the profiles.
-- Not ported: SSCS, which pulls nearly clipped highlights towards neutral. Edit's 3D LUT and hue/saturation stages are off at default settings.
+- SSCS (bright, saturated colours pulled towards their luma) is ported (`sonylook/sony_sscs.py`) but not yet applied in the profiles. Edit's 3D LUT and hue/saturation stages are off at default settings.
 
 ### 2. Lookup-table representation
 
