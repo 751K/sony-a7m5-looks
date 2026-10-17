@@ -78,6 +78,7 @@ Sony 创意外观可以视为一个从**白平衡后的相机原生 RGB** 到**�
 - 每种外观都按相机里创意外观的默认参数渲染：12 种外观的对比度、高光、阴影、饱和度都是 0；褪色 FL2/FL3 为 1，IN 为 3，SH 为 6。
 - 锐化、降噪、清晰度、DRO 等阶段依赖邻域像素，不属于逐像素映射，不纳入配置。
 - 解码器的去马赛克（ZcTaskITP）已逐位移植到 `sonylook/sony_itp.py`，包括 Sony 的 1024 像素分块，不进入配置文件。
+- 完整解码器已串联在 `sonylook/sony_decode.py`：`decode(arw)` 依次运行 RawNR、ITP、DRO、镜头几何、SSCS、外观链和 Marble；DSC03591 的全图 7008×4672 与 Edit 导出的 8 位 MAE 为 0.13。
 - 配置文件也包含 SSCS（`sonylook/sony_sscs.py`）。严格来说它属于外观之前的解码器阶段，但它是逐像素的，在两个软件里都能改善结果（见上文）。Edit 的 3D LUT 和色相/饱和度两个阶段在默认参数下不运行。
 
 ### 2. 查找表表示
@@ -134,6 +135,16 @@ python3 sonylook/sony_render.py /path/to/A7M5.ARW Standard FL2 --scale 4
 - 第一条生成 C1 配置，第二条生成 ACR 配置，第三条用外观链直接渲染预览。
 - 用 DSC03591 重新生成的结果，与 `profiles/` 里的文件逐字节相同。
 
+### 解码 ARW
+
+完整解码器会从 RawNR 一路运行到创意外观：
+
+```bash
+python3 sonylook/sony_decode.py /path/to/A7M5.ARW --out out.tif
+```
+
+输出 7008×4672 的解码器矩形，可选 16 位 TIFF 或 8 位 PNG。外观和可选阶段按 ARW 里 Edit 保存的显影设置决定；没保存过的文件，按 Edit 首次打开时的初始值（拍摄时的外观、相机的降噪和 DRO、镜头校正开、该外观的默认清晰度）；`--no-nr`、`--no-dro`、`--no-marble`、`--no-detail`、`--no-lens`、`--no-sscs` 可分别关闭。
+
 ### 重新标定（换软件版本时）
 
 1. 合成色卡已经放在 `chart/` 里，可以直接用。也可以用 `python3 capture_one/make_chart.py SOURCE.ARW` 从自己的 A7M5 照片重新生成。
@@ -155,7 +166,7 @@ python3 sonylook/sony_render.py /path/to/A7M5.ARW Standard FL2 --scale 4
 | -------------- | --------------------------------------------------------------------------- |
 | `profiles/`    | 生成好的配置：C1 的 ICC，ACR 的 DCP 和 XMP                                             |
 | `chart/`       | 合成色卡：`SonyChart.ARW`（可直接用 C1 / ACR 打开）、色块定义 `SonyChart.json`、预览图            |
-| `sonylook/`    | Sony 外观链与前端的 Python 移植，以及 ARW / Edit 读取器。另含 RawNR、DRO、锐化 / Spica、Marble、镜头几何校正（都不用于配置）以及 BW/SE 的 Effect 阶段（用于配置） |
+| `sonylook/`    | Sony 外观链与前端的 Python 移植，以及 ARW / Edit 读取器。另含 RawNR、DRO、锐化 / Spica、Marble、镜头几何校正（都不用于配置）、BW/SE 的 Effect 阶段（用于配置），以及整图解码器 `sony_decode.py` |
 | `capture_one/` | C1 配置生成、合成色卡、测量与对比                                                          |
 | `camera_raw/`  | ACR 表格式、DCP 读写、配置生成、测量与对比                                                   |
 | `docs/`        | 研究记录：处理链细节、C1 和 ACR 的标定过程。文中提到的证据文件、测试导出不在本仓库                               |

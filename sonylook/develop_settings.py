@@ -8,12 +8,16 @@ At the end of an Edit-saved ARW there is a small TIFF-like block (1630 bytes for
     0xd001  LONG 2  offset (relative to the block) of two uint32 IFD offsets
     0xd002  LONG 1  ...
 
-The two IFDs are the "current" and "initial" settings.  Each entry is
-{setting id, type, count, value}; the ids are what FUN_1000aac90 reads, and the
-serializer is around 0x10010ebxx (type 3 = SHORT, 9 = SLONG, 4 = LONG).
+The two IFDs are two snapshots.  The first (offset order) carries the capture
+timestamp (its 0xd100 string) and the camera-side settings; the second has the
+later Edit-session timestamp and is the state Edit used for the export -- the
+reference TIFFs match it (NR off, DRO off, CA off), not the first.  Each entry
+is {setting id, type, count, value}; the ids are what FUN_1000aac90 reads, and
+the serializer is around 0x10010ebxx (type 3 = SHORT, 9 = SLONG, 4 = LONG).
 
-read_settings(arw) returns the current settings as {id: int | tuple | str};
-an original (unsaved) ARW returns {} and callers keep their defaults.
+read_settings(arw) returns the Edit-session settings (second IFD) as
+{id: int | tuple | str}; an original (unsaved) ARW returns {} and callers keep
+their defaults.  read_settings_pair() returns (camera, edit).
 """
 from __future__ import annotations
 
@@ -76,19 +80,100 @@ def _block_base(data: bytes) -> int | None:
 
 
 def read_settings_pair(arw) -> tuple[dict, dict]:
-    """(current, initial) settings from an Edit-saved ARW; ({}, {}) when absent."""
+    """(camera, edit) snapshots from an Edit-saved ARW; ({}, {}) when absent.
+
+    The camera snapshot has the capture-time 0xd100 timestamp; the edit snapshot
+    is the later Edit session and matches what the export used.
+    """
     data = Path(arw).read_bytes()
     base = _block_base(data)
     if base is None:
         return {}, {}
     off2 = struct.unpack_from("<I", data, base + 22)[0]
-    cur, init = struct.unpack_from("<2I", data, base + off2)
-    return _ifd(data, base, cur), _ifd(data, base, init)
+    cam, edit = struct.unpack_from("<2I", data, base + off2)
+    return _ifd(data, base, cam), _ifd(data, base, edit)
 
 
 def read_settings(arw) -> dict:
-    """Current develop settings; {} for an ARW the camera wrote itself."""
-    return read_settings_pair(arw)[0]
+    """Edit-session develop settings; {} for an ARW the camera wrote itself."""
+    cam, edit = read_settings_pair(arw)
+    return edit if edit else cam
+
+
+LOOK_SELECT = 0x8000                      # dev+0x1e0: 1 = as shot, else a look id (vtable+0xe0)
+DRO_LEVEL, FADE = 0x8023, 0x901B          # dev+0x23c, dev+0x2bc (10 x Fade)
+
+
+def _lens_switch_default(h):
+    """0x1000a7100: a lens tag's u16 -> dev+0x278/+0x27c (-1 auto, 1 on, 2 off, 0 none)."""
+    h &= 0xFFFF
+    if h >= 0x100:
+        return 0
+    lo = h & 0xFF
+    return -1 if lo == 0x11 else 2 if lo == 0 else 1
+
+
+def camera_defaults(arw) -> dict:
+    """The settings Edit 4.0 starts from for an ARW it has never saved (FUN_1000a6e9c).
+
+    Same ids as read_settings().  Only the entries the decoder uses are filled:
+      0x8000 = 1 (as shot); 0x8002 = 1 (as-shot WB);
+      0x801e = NR: SR2 0x78a0 != 0 (look+0x1016), else 0x78a1 != 0 (look+0x1017);
+      0x8022/0x8023 = DRO from MakerNote 0xb025 (format codes 0x3400..0x3ffe, i.e. the A7M5):
+               2 or 3 (auto) -> 1, 0 -> 0, anything else -> 2 with level 15*v - 215;
+      0x8040 = distortion from SR2 0x7983 (look+0x12fc/0x12fe, else 0x7981 at look+0x12d0);
+      0x900d = CA from SR2 0x797f (look+0x12d2); both through _lens_switch_default and
+               zero when the lens table count (look+0x12c0, here 0x7982) is absent;
+      0x901c = clarity, 0x901b = fade: Edit's per-look default table (vtable+0x178).
+    The camera snapshot Edit writes into a saved ARW has these same values (DSC03591).
+    """
+    import struct
+    import arw_looks as AL
+    import decoder_params as DP
+    import sony_marble as MB
+    import sony_render as R
+    import sr2
+
+    tags = {k: (v[1] if isinstance(v[1], list) else [v[1]]) for k, v in sr2.sr2_subifd(str(arw)).items()}
+    one = lambda t, d=0: int(tags[t][0]) if t in tags else d
+
+    buf = Path(arw).read_bytes()
+    ifd0 = DP._ifd(buf, struct.unpack_from("<I", buf, 4)[0])
+    exif = DP._ifd(buf, DP._get(buf, ifd0, 0x8769))
+    maker, mbase = DP._maker_ifd(buf, exif)
+    dro_tag = DP._get(buf, maker, 0xB025, 0, mbase)
+    if dro_tag in (2, 3):
+        dro, level = 1, 0
+    elif dro_tag == 0:
+        dro, level = 0, 0
+    else:
+        dro, level = 2, 15 * dro_tag - 215
+
+    nr = 1 if one(0x78A0) else (1 if one(0x78A1) else 0)
+
+    if 0x7982 in tags:                                   # look+0x12c0 != 0
+        m = tags.get(0x7983, [-1, -1])
+        if m[0] != -1:
+            src = m[0]
+        elif len(m) > 1 and m[1] != -1:
+            src = m[0]
+        else:
+            src = one(0x7981, 0)
+        dist, ca = _lens_switch_default(src), _lens_switch_default(one(0x797F, 0))
+    else:
+        dist, ca = 0, 0
+
+    name = str(AL.main_tags(str(arw)).get("0x7770", "Standard")).strip()
+    look_id = R.LOOK_IDS.get(name, 0)
+    fade = 10 * R.CAMERA_FADE.get(name, 0) if look_id not in (0x16, 0x17) else 0
+    return {LOOK_SELECT: 1, WB_MODE: 1, NR_ON: nr, DRO_ON: dro, DRO_LEVEL: level,
+            DISTORTION: dist, CA_CORRECTION: ca, CLARITY: MB.clarity_default(look_id), FADE: fade}
+
+
+def effective_settings(arw) -> dict:
+    """read_settings() for an Edit-saved ARW, else camera_defaults()."""
+    st = read_settings(arw)
+    return st if st else camera_defaults(arw)
 
 
 def marble_dev(settings) -> dict:

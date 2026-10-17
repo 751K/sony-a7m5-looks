@@ -83,6 +83,7 @@ Further points:
 - Each look is rendered with the camera's default Creative Look settings. Contrast, highlights, shadows and saturation are 0 for all twelve; Fade is 1 for FL2/FL3, 3 for IN and 6 for SH.
 - Sharpening, noise reduction, clarity and DRO depend on neighbouring pixels, so they are not per-pixel mappings and are left out of the profiles.
 - The decoder's demosaic (ZcTaskITP) is ported bit-exactly in `sonylook/sony_itp.py`, including Sony's 1024-pixel tiling; it is not part of the profiles.
+- The whole decoder is wired end to end in `sonylook/sony_decode.py`: `decode(arw)` runs RawNR, ITP, DRO, lens geometry, SSCS, the look chain and Marble. Against Edit's export of DSC03591 the whole 7008×4672 image matches at 0.13 (8-bit MAE).
 - The profiles also include SSCS (`sonylook/sony_sscs.py`). Strictly speaking it is a decoder stage that runs before the look, but it is per pixel and improves both hosts (see above). Edit's 3D LUT and hue/saturation stages are off at default settings.
 
 ### 2. Lookup-table representation
@@ -150,6 +151,16 @@ python3 sonylook/sony_render.py /path/to/A7M5.ARW Standard FL2 --scale 4
 
 Regenerating from DSC03591 reproduces the files in `profiles/` byte for byte.
 
+### Decoding an ARW
+
+The full decoder runs every stage from RawNR to the Creative Look:
+
+```bash
+python3 sonylook/sony_decode.py /path/to/A7M5.ARW --out out.tif
+```
+
+It writes the 7008×4672 decoder rectangle as 16-bit TIFF or 8-bit PNG. The look and the optional stages follow Edit's saved develop settings when the ARW has them, and otherwise the values Edit starts from for an unsaved file (as-shot look, NR and DRO from the camera, lens corrections on, the look's default clarity); `--no-nr`, `--no-dro`, `--no-marble`, `--no-detail`, `--no-lens` and `--no-sscs` turn them off.
+
 ### Recalibration (for new software versions)
 
 1. **Chart:** the synthetic chart is in `chart/`. You can also build one from your own A7M5 photo with `python3 capture_one/make_chart.py SOURCE.ARW`, which only reads the source file.
@@ -168,7 +179,7 @@ Regenerating from DSC03591 reproduces the files in `profiles/` byte for byte.
 | --- | --- |
 | `profiles/` | Generated profiles: Capture One ICC; Camera Raw DCP and XMP |
 | `chart/` | Synthetic chart: `SonyChart.ARW` (opens in Capture One and Camera Raw), patch definitions `SonyChart.json`, preview image |
-| `sonylook/` | Python port of Sony's look chain and front end, ARW and Edit readers. Also ports of RawNR, DRO, sharpening / Spica, Marble, lens geometry correction (none used by the profiles) and the BW/SE Effect stage (used) |
+| `sonylook/` | Python port of Sony's look chain and front end, ARW and Edit readers. Also ports of RawNR, DRO, sharpening / Spica, Marble, lens geometry correction (none used by the profiles) and the BW/SE Effect stage (used), plus the end-to-end decoder `sony_decode.py` |
 | `capture_one/` | Capture One profile generation, synthetic chart, measurement and comparison |
 | `camera_raw/` | Camera Raw table format, DCP read/write, profile generation, measurement and comparison |
 | `docs/` | Research notes in Chinese: pipeline details and the calibration of Capture One and Camera Raw. Evidence files and test exports mentioned there are not included |
