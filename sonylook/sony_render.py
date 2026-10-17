@@ -85,13 +85,20 @@ def front_end_sony(arw, scale=8, lens=True, dro=None, wb_mode=None, temperature=
         dro = int(st.get(DS.DRO_ON, 0)) == 1
     main = AL.main_tags(arw)
     black = ints(main["0x7310"])                                        # BlackLevel
-    gains = F.wb_gains(ints(main["0x7313"]), int(main["0x7809"]), tint, exposure,
-                       mode=wb_mode, temperature=temperature,
-                       temp_table=F.wb_temperature_table(main), presets=F.wb_presets(main),
-                       rb_factor=rb_factor)                             # WB_RGGBLevels
+    levels = ints(main["0x7313"])                                       # WB_RGGBLevels
+    k7809 = int(main["0x7809"])
     s7311 = int(main["0x7311"])
     with rawpy.imread(str(arw)) as r:
         assert r.raw_pattern.tolist() == [[0, 1], [3, 2]] and r.color_desc == b"RGBG"
+        if wb_mode == 3:
+            # picker / custom: the box coordinates are in full decoder (RAW) space
+            sr, sb = F.wb_pick_state(arw, r.raw_image_visible, black, levels)
+            gains = F.wb_gains(levels, k7809, tint, exposure, mode=3, state_r=sr, state_b=sb,
+                               rb_factor=rb_factor)
+        else:
+            gains = F.wb_gains(levels, k7809, tint, exposure, mode=wb_mode, temperature=temperature,
+                               temp_table=F.wb_temperature_table(main), presets=F.wb_presets(main),
+                               rb_factor=rb_factor)
         raw = r.raw_image_visible[CROP["top"]:CROP["top"] + CROP["height"], CROP["left"]:CROP["left"] + CROP["width"]]
         cfa = F.itp_scale(raw, black, gains, s7311)
     # ITP interpolates the signed float samples, then clamps to 0..16383 and truncates to u16.

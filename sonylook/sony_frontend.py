@@ -202,13 +202,51 @@ def wb_pick_gains(raw, black, levels, x0, y0, x1, y1, cfa=(0, 1, 1, 2), model_id
 
 
 def wb_custom_gains(raw, black, levels, k_7809, x0, y0, x1, y1, *, exposure=0,
-                    rb_factor=0, cfa=(0, 1, 1, 2), model_id=1):
+                    rb_factor=0, cfa=(0, 1, 1, 2), model_id=1, ref_rb=None):
     """Picker WB end to end: wb_pick_gains -> wb_gains(mode 3).
 
     `raw` is the unsubtracted CFA image in decoder coordinates; `levels` the
     as-shot 0x7313 array; black the 0x7310 levels.  Tint does not apply to
     mode 3 (see wb_gains)."""
-    sr, sb = wb_pick_gains(raw, black, levels, x0, y0, x1, y1, cfa=cfa, model_id=model_id)
+    sr, sb = wb_pick_gains(raw, black, levels, x0, y0, x1, y1, cfa=cfa, model_id=model_id,
+                           ref_rb=ref_rb)
+    return wb_gains(levels, k_7809, 0, exposure, mode=3, state_r=sr, state_b=sb,
+                    rb_factor=rb_factor)
+
+
+def wb_pick_state(arw, raw, black, levels, *, cfa=(0, 1, 1, 2), model_id=1, ref_rb=None):
+    """The two decoder-state gains for WB mode 3, from an Edit-saved ARW.
+
+    FUN_1000d3438's mode-3 branch: when setting 0x9015 (dev+0x26c) is non-zero
+    the gains are 0x9016 (dev+0x270/+0x274) / 1024; otherwise the picker box in
+    0x8021 (dev+0x24c..: x0, y0, x1, y1) is sampled through FUN_1000ae728.
+    `raw` is only needed for the picker branch.
+    """
+    import develop_settings as DS
+    st = DS.read_settings(arw)
+    if not st:
+        raise ValueError("no develop settings block (ARW was not saved by Edit)")
+    if int(st.get(DS.PICKER_USE_GAINS, 0)) != 0:
+        g = st.get(DS.PICKER_GAINS, (0, 0))
+        return (f32(f32(g[0]) * f32(0.0009765625)),
+                f32(f32(g[1]) * f32(0.0009765625)))
+    box = st.get(DS.PICKER_BOX)
+    if not box or len(box) < 4:
+        raise ValueError("picker box 0x8021 missing")
+    return wb_pick_gains(raw, black, levels, int(box[0]), int(box[1]), int(box[2]), int(box[3]),
+                         cfa=cfa, model_id=model_id, ref_rb=ref_rb)
+
+
+def wb_pick_from_settings(arw, raw, black, levels, k_7809, *, exposure=None, rb_factor=None,
+                          cfa=(0, 1, 1, 2), model_id=1, ref_rb=None):
+    """Mode-3 WB end to end from an Edit-saved ARW (state gains + exposure/R-B factor)."""
+    import develop_settings as DS
+    st = DS.read_settings(arw)
+    sr, sb = wb_pick_state(arw, raw, black, levels, cfa=cfa, model_id=model_id, ref_rb=ref_rb)
+    if exposure is None:
+        exposure = int(st.get(DS.EXPOSURE, 0))
+    if rb_factor is None:
+        rb_factor = int(st.get(DS.RB_FACTOR, 0))
     return wb_gains(levels, k_7809, 0, exposure, mode=3, state_r=sr, state_b=sb,
                     rb_factor=rb_factor)
 

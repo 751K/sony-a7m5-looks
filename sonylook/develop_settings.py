@@ -31,21 +31,23 @@ WB_MODE, WB_TEMPERATURE, WB_TINT, RB_FACTOR = 0x8002, 0x8013, 0x8014, 0x8015
 EXPOSURE, NR_ON, DRO_ON, CLARITY = 0x8018, 0x801E, 0x8022, 0x901C
 NR_STRENGTH = 0x8029                      # dev+0x224 (Marble d224)
 DISTORTION, CA_CORRECTION = 0x8040, 0x900D
+PICKER_BOX, PICKER_USE_GAINS, PICKER_GAINS = 0x8021, 0x9015, 0x9016
 
 
 def _ifd(data: bytes, base: int, off: int) -> dict:
-    n = struct.unpack_from("<H", data, base + off)[0]
+    start = base + off
+    n = struct.unpack_from("<H", data, start)[0]
     if n > 200:
         raise ValueError("implausible settings IFD")
     out = {}
     for i in range(n):
-        tag, typ, cnt, val = struct.unpack_from("<HHII", data, base + off + 2 + 12 * i)
+        tag, typ, cnt, val = struct.unpack_from("<HHII", data, start + 2 + 12 * i)
         fmt, size = _TYPES.get(typ, ("B", 1))
         total = size * cnt
         if total <= 4:
             raw = struct.pack("<I", val)[:total]
-        else:
-            raw = data[base + val:base + val + total]
+        else:                             # out-of-line values are relative to the IFD start
+            raw = data[start + val:start + val + total]
         if typ == 2:
             out[tag] = raw.split(b"\0")[0].decode("latin-1")
         elif typ in (5, 10):
