@@ -36,6 +36,13 @@ def params_from_tags(tags, cfa=(0, 1, 1, 2)):
     return dict(T=one(0x7882), tR=one(0x7883), tG=one(0x7884), tB=one(0x7885), w=tuple(w))
 
 
+def params_from_arw(arw):
+    """params_from_tags on the SR2SubIFD of an ARW (read only)."""
+    import sr2
+    tags = {k: (v[1] if isinstance(v[1], list) else [v[1]]) for k, v in sr2.sr2_subifd(str(arw)).items()}
+    return params_from_tags(tags)
+
+
 def sscs_int(r, g, b, p):
     """Integer path (0x1000f1238..0x1000f1358). r, g, b: uint16 arrays. Returns uint16 arrays."""
     T, tR, tG, tB = p["T"], p["tR"], p["tG"], p["tB"]

@@ -94,8 +94,11 @@ def box(img, s):
 
 
 class Look:
-    def __init__(self, name, looks, fade=None):
-        """fade: Creative Look Fade slider 0..9; None = the camera default for this look."""
+    def __init__(self, name, looks, fade=None, sscs=None):
+        """fade: Creative Look Fade slider 0..9; None = the camera default for this look.
+        sscs: None, or sony_sscs params to apply ZcTaskSSCS in every render() call (decoder stage, not
+        part of the look; the published profiles leave it out)."""
+        self.sscs = sscs
         g = looks[name]
         self.name = name
         MAIN = self.main = looks["_main"]
@@ -142,6 +145,7 @@ class Look:
         marble: None, or dict(look=sony_marble.Look, dev=dict(d218, d224, d2c0), dec=...) to run
         ZcTaskMarble after YCC2RGB; the outer 16 px of the array are then not valid."""
         atan, _ = SL.load_static_tables()
+        sscs = self.sscs if sscs is None else sscs
         if sscs is not None:
             fn = SC.sscs_int if np.issubdtype(np.asarray(lin).dtype, np.integer) else SC.sscs_float
             lin = np.stack(fn(*(np.ascontiguousarray(lin[..., c]) for c in range(3)), sscs), -1)

@@ -18,6 +18,7 @@ import acr_encoding as E  # noqa: E402
 import acr_profiles as A  # noqa: E402
 import c1_look_profile as C  # noqa: E402
 import sony_render as R  # noqa: E402
+import sony_sscs as SC  # noqa: E402
 
 XYZ_TO_PROPHOTO = np.linalg.inv(A.PROPHOTO_TO_XYZ)
 SRGB_TO_PROPHOTO = XYZ_TO_PROPHOTO @ C.CHAD @ C.M_SRGB
@@ -80,13 +81,20 @@ def main():
     ap.add_argument("--looks", default=",".join(C.NAMES))
     ap.add_argument("--eval", action="store_true")
     ap.add_argument("--write", action="store_true")
+    ap.add_argument("--sscs", action="store_true",
+                    help="experimental: include Sony's SSCS decoder stage; files get an ' SSCS' suffix")
+    ap.add_argument("--out", help="output folder (default profiles/camera_raw)")
     a = ap.parse_args()
+    if a.out:
+        A.OUT = Path(a.out)
     looks = R.load_looks(a.arw)
+    sscs = SC.params_from_arw(a.arw) if a.sscs else None
+    suffix = " SSCS" if a.sscs else ""
     lin = R.front_end_sony(a.arw, 4) if a.eval else None
     if a.write:
         A.OUT.mkdir(exist_ok=True); A.write_base()
     for name in a.looks.split(","):
-        look = R.Look(name, looks)
+        look = R.Look(name, looks, sscs=sscs)
         tab = build(look, a.grid)
         msg = f"{C.NAMES[name]:4s}"
         if a.eval:
@@ -97,7 +105,7 @@ def main():
                 e = np.abs(got - ref) * 255
                 msg += f"  {mode}: MAE {e.mean():.3f} p99 {np.percentile(e, 99):.2f}"
         if a.write:
-            msg += "  " + A.write_look(f"Look {C.NAMES[name]}", tab).name
+            msg += "  " + A.write_look(f"Look {C.NAMES[name]}{suffix}", tab).name
         print(msg, flush=True)
 
 

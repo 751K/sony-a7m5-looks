@@ -216,6 +216,8 @@ def main():
     ap.add_argument("--grid", type=int, default=65)
     ap.add_argument("--looks", default=",".join(NAMES))
     ap.add_argument("--out", default=str(HERE.parent / "profiles" / "capture_one"))
+    ap.add_argument("--sscs", action="store_true",
+                    help="experimental: include Sony's SSCS decoder stage; files get a '-SSCS' suffix")
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     if a.probes:
@@ -226,11 +228,14 @@ def main():
     if not a.arw:
         ap.error("ARW required (or --probes)")
     looks = R.load_looks(a.arw)
+    import sony_sscs as SC
+    sscs = SC.params_from_arw(a.arw) if a.sscs else None
+    sfx = ("-SSCS", " SSCS") if a.sscs else ("", "")
     for name in a.looks.split(","):
-        look = R.Look(name, looks)
+        look = R.Look(name, looks, sscs=sscs)
         lab = build_clut(look, a.grid)
-        fn = out / f"SonyA7M5-Look-{NAMES[name]}.icc"
-        write_icc(fn, f"SonyA7M5 Look {NAMES[name]}", lab)
+        fn = out / f"SonyA7M5-Look-{NAMES[name]}{sfx[0]}.icc"
+        write_icc(fn, f"SonyA7M5 Look {NAMES[name]}{sfx[1]}", lab)
         print(fn.name, fn.stat().st_size, "L range", lab[..., 0].min().round(2), lab[..., 0].max().round(2))
 
 
