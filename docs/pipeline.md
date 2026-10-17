@@ -396,7 +396,7 @@ LUT 构建 `FUN_1000c7120`：
 | 阶段 | 条件 | 本图 | 结论 |
 | --- | --- | --- | --- |
 | AreaComp（RGB2YCC 之后） | 格式代码 > 0x3232，且 `&0xf000 == 0x3000`，且 ≠ 0x3fff | 0x3600 | **运行**，已移植，逐位一致 |
-| Marble（YCC2RGB 之后） | `(dev+0x218 == 1 且 look+0x109c ≠ 0)` 或 dev+0x2c0 ≠ 0 | 0x801e = 1，0x794a = 1，0x901c = 10 | **运行**，未移植（见下） |
+| Marble（YCC2RGB 之后） | `(dev+0x218 == 1 且 look+0x109c ≠ 0)` 或 dev+0x2c0 ≠ 0 | 0x801e = 1，0x794a = 1，0x901c（清晰度）= 10 | **运行**，已移植（§10.16） |
 | Effect | `look+0x34 & ~1 == 0x10`（BW/Sepia） | 2 / 0x16 / 0x17 | 本图不运行；BW/SE 运行，已移植（§10.14） |
 | ToneCurve | `FUN_1000aed14(dev)`：4 条曲线全为恒等时跳过。曲线点 x 来自 0x9000+k，y 来自 0x9004+k（/511） | 全部是 `[0, 511]` | 不运行 |
 | ShadeCorrection | dev+0x17c 或 dev+0x180 ≠ 0。它们由 `FUN_1000c4ee8(dev+0x170, 0x8030, 0x8031, 0x8032)` 写入，函数用 cos⁴ 规律生成暗角补偿曲线 | 80 / 0 / 0 | 不运行 |
@@ -687,7 +687,8 @@ LUT 构建 `FUN_1000c7120`：
 - **三张参考图导出时降噪都是关的**，与 DRO 的情况相同（§10.12）：ARW 里的 0x801e = 1 是之后保存进去的，初始值为 0。
 - **ST 导出时 Marble 运行了**（0x901c ≥ 1）。最平坦的裁块 (3500, 2300) 从 0.212 降到 **0.024**，基本逐像素一致。
 - **FL2 / FL3 导出时 Marble 没有运行**（0x901c = 0）：取 1 到 100 的任何值都更差。0x901c = 1–10 的结果几乎一样，因为亮度增益很小，ST 的改善主要来自色度 2:1 和亮度 10 位量化。
-- 0x901c 的默认值随外观变化，但外观 IFD 里没有对应的标签。Edit 有 `DevelopmentController::ModifyClarity / ResetClarity`；Reset 按外观编号向文档层（vtable+0xd8）查默认值，那部分实现不在 Edit_arm64 里。所以"0x901c 就是清晰度"**只是推测，没有证实**。
+- **0x901c 就是清晰度（Clarity），已证实。** `GfDocument::ModifyClarity` 的闭包（0x10021579c → 0x1002095d0）把值限制在 0–100 后写入开发参数 +0x2c0，正是 0x901c 落到的位置。`DevelopmentController::ResetClarity`（0x100056324）先调用文档的 vtable+0xd8（0x10020f398），它再调用 ARW 解码器的 vtable+0x188（0x1000be5c4），后者经 vtable+0x178（0x1000be178）按外观编号查 Edit 内的静态表 **0x1002e8214**（每行 0x24 字节，以 0 结尾），取最后一个字段乘以 10 作为默认值。之前以为这部分不在 Edit_arm64 里，是因为没有跟进解码器对象的虚表。
+- 表中清晰度：ST、VV、NT、BW、SE、FL、IN、SH 以及 0x18 为 1，PT 为 0，VV2 为 8（所以默认 0x901c 分别是 10 / 0 / 80）；IN、SH 另有 3、6，表中其他参数都是 0。**表里没有 FL2（0x16）和 FL3（0x17）**，查表失败，所有默认值（包括清晰度）都是 0，Marble 只在降噪打开时才可能运行。这正好解释了上面的结果：ST 默认清晰度 10，Marble 运行；FL2/FL3 默认 0，Marble 不运行。在 Unicorn 里对本 ARW 调用解码器 vtable+0x188，得到的默认值与静态表一致。`sony_marble.clarity_default(look_id)` 给出这个默认值。
 
 `sony_render.Look.render(..., marble=dict(look, dev, dec))` 可以在 YCC2RGB 之后运行 Marble。RawNR 用 `sony_rawnr.rawnr` 在 ITP 之前处理。两者都是空间处理，不进入 LUT，已发布的配置文件不受影响。
 

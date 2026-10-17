@@ -45,6 +45,15 @@ UPW_BASE = 0x1002ed4a8
 # (t12, t11, t32, t10) for (c00, c01, c11, c10)
 UP_TABLES = {4: (0x1002ed4a8, 0x1002ed4c8, 0x1002ed4e8, 0x1002ed508),
              8: (0x1002ed528, 0x1002ed5a8, 0x1002ed628, 0x1002ed6a8)}
+# Edit's per-look Clarity default (DAT_1002e8214, 0x24-byte rows, last field), read by the decoder's
+# vtable+0x178 and scaled x10 into dev+0x2c0 (setting 0x901c, slider 0..100). FL2 (0x16) and FL3 (0x17)
+# have no row in 4.0.00.10312, so vtable+0x178 fails and every default, Clarity included, is 0.
+CLARITY_DEFAULT = {2: 1, 4: 1, 7: 1, 8: 0, 0x10: 1, 0x11: 1, 0x12: 1, 0x13: 8, 0x14: 1, 0x15: 1, 0x18: 1}
+
+
+def clarity_default(look_id):
+    """dev+0x2c0 (setting 0x901c) after Reset in Edit for a look id (sony_render.LOOK_IDS)."""
+    return 10 * CLARITY_DEFAULT.get(look_id, 0)
 
 
 
