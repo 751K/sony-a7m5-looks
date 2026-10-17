@@ -5,7 +5,13 @@ Lens struct L (render+0x18) built by FUN_1000d58f0 -> FUN_1000d65a0 (mode 1, loo
 != -1) from SR2 0x7984 (distortion, 19 knots), 0x7980 (CA), 0x7983:
     L+0x08/0x10/0x18  float tables R/G/B (G[i] = 1 + 0x7984[i]/32768)
     L+0x20 s, L+0x28 s2 (fill-frame zoom), L+0x3c/0x40 centre, L+0x44 knot spacing (px),
-    L+0x2c..0x38 R/B lateral offsets (int bits, 0 here)
+    L+0x2c..0x38 R/B lateral offsets from FUN_1000d58f0's shift block:
+                  0x78a2 (look+0x12e8..), 0x78a3 (look+0x12f0), the decoder rect and
+                  0x7922 (look+0x12f4/0x12f8); f0 + FUN_1000bd904 == 0x10 doubles dx/dy.
+    centre = integer half of the decoder rect (vt+0x88); 0x7922 gives the same size for
+    full frame.  look+8 = 1 (0x7983[1] == 16, full frame) or 2 (== 11, APS-C) selects
+    21.63 / 14.2.  Distortion / CA switches come from dev+0x278 (0x8040) and dev+0x27c
+    (0x900d) through FUN_1000aed68 / FUN_1000aed80.
 For every output pixel p (whole-image coordinates) and channel k (FUN_1000d6b04 / 0x1000d6b20):
     r = |p - c|;  t = s2*r / L44;  f = lerp(table_k, t)  (last knot beyond the table)
     src = c + s*f*((p + off_k) - c)
@@ -83,11 +89,37 @@ def _interp_g(G, x):
     return f32(G[18])
 
 
-def lens_struct_from_tags(dist, ca_r, ca_b, half_w, half_h, p5=1, look8=0, dist_on=True, ca_on=True,
-                          offsets=((0, 0), (0, 0))):
+def lens_switch(v):
+    """FUN_1000aed68 / FUN_1000aed80: is the correction on for dev+0x278 / dev+0x27c?
+    On for -1 (auto) and 1; off for 0, 2, 3 and anything else."""
+    u = (int(v) + 1) & 0xFFFFFFFF
+    return (u & 1) == 0 and u < 4
+
+
+def _shift_offsets(shift, shift_div, rect, crop, scale2=False):
+    """FUN_1000d58f0's lens-shift block: look+0x12e8.. (0x78a2), 0x12f0 (0x78a3),
+    0x12f4/0x12f8 (0x7922), the decoder rect, and the f0/0x10 doubling."""
+    if not shift_div or not crop[0] or not crop[1]:
+        return (f32(0.0), f32(0.0)), (f32(0.0), f32(0.0))
+    dx = f32(f32(rect[2] - rect[0]) / f32(crop[0]))
+    dy = f32(f32(rect[3] - rect[1]) / f32(crop[1]))
+    if scale2:
+        dx, dy = f32(dx + dx), f32(dy + dy)
+    inv = f32(f32(1.0) / f32(f32(shift_div) * f32(256.0)))
+    tdx, tdy = f32(dx * f32(1000.0)), f32(dy * f32(1000.0))
+    return ((f32(tdx * f32(f32(shift[0]) * inv)), f32(tdy * f32(f32(shift[1]) * inv))),
+            (f32(tdx * f32(f32(shift[2]) * inv)), f32(tdy * f32(f32(shift[3]) * inv))))
+
+
+def lens_struct_from_tags(dist, ca_r, ca_b, rect, p5=1, look8=0, dist_on=True, ca_on=True,
+                          shift=(0, 0, 0, 0), shift_div=0, crop=None, scale2=False):
     """dist: 0x7984 knots (without the leading count); ca_r / ca_b: the two halves of 0x7980;
-    half_w / half_h: integer half sizes of the decoder rect (vt+0x88), i.e. 3504 / 2336."""
+    rect: decoder effective rectangle (x0, y0, x1, y1) from vt+0x88;
+    look8: look+8 (1 full frame, 2 APS-C); crop: the 0x7922 (width, height) denominators
+    (defaults to the rect size); shift: 0x78a2, shift_div: 0x78a3."""
     n = len(dist)
+    crop = tuple(crop) if crop is not None else (rect[2] - rect[0], rect[3] - rect[1])
+    half_w, half_h = (rect[2] - rect[0]) // 2, (rect[3] - rect[1]) // 2
     G, R, B = (np.zeros(n, f32) for _ in range(3))
     for i in range(n):
         d7 = float(dist[i]) * 3.0517578125e-05 + 1.0 if dist_on else 1.0
@@ -128,22 +160,33 @@ def lens_struct_from_tags(dist, ca_r, ca_b, half_w, half_h, p5=1, look8=0, dist_
                 if v > hy or y >= hi:
                     break
         res = f32(best / hy) if best != 0 else _interp_g(G, f32(f32(hy * K_MM) * mm))
-    asf = lambda v: np.frombuffer(np.int32(v).tobytes(), "<f4")[0]
+    offR, offB = _shift_offsets(shift, shift_div, rect, crop, scale2)
     return dict(mode=1, n=n, tables=[R, G, B], s=res, s2=res, cx=cx, cy=cy, step=step,
-                off=[(asf(offsets[0][0]), asf(offsets[0][1])), (0, 0), (asf(offsets[1][0]), asf(offsets[1][1]))])
+                off=[offR, (f32(0.0), f32(0.0)), offB])
 
 
-def lens_from_arw(arw):
-    """Lens struct for an ARW (SR2 0x7984 / 0x7980), default develop settings (distortion + CA on)."""
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_structure"))
+def lens_from_arw(arw, rect=None, dist_setting=-1, ca_setting=1, p5=1, f0=False, zoom2=False):
+    """Lens struct for an ARW.
+
+    SR2 0x7984 (distortion), 0x7980 (CA), 0x7922 (crop width/height), 0x7983 (mode:
+    0x7983[1] == 16 full frame, 11 APS-C -> look+8), 0x78a2/0x78a3 (lens shift).
+    rect: decoder effective rectangle (vt+0x88); None uses (0, 0, 0x7922 width/height),
+    which is exact for full-frame.  dist_setting/ca_setting are dev+0x278/+0x27c
+    (settings 0x8040 / 0x900d; -1 = auto, on).
+    """
     import sr2
     tags = sr2.sr2_subifd(str(arw))
     dist = tags[0x7984][1][1:]
     ca = tags[0x7980][1][1:]
     half = len(ca) // 2
-    return lens_struct_from_tags(dist, ca[:half], ca[half:], 3504, 2336)
+    crop = tuple(tags[0x7922][1][:2])
+    rect = tuple(rect) if rect is not None else (0, 0, crop[0], crop[1])
+    mode = tags[0x7983][1][1]
+    look8 = 2 if mode == 11 else 1 if mode == 16 else 0
+    return lens_struct_from_tags(dist, ca[:half], ca[half:], rect, p5=p5, look8=look8,
+                                 dist_on=lens_switch(dist_setting), ca_on=lens_switch(ca_setting),
+                                 shift=tuple(tags[0x78a2][1][:4]), shift_div=tags[0x78a3][1][0],
+                                 crop=crop, scale2=bool(f0 and zoom2))
 
 
 def geocorr_downscaled(img, L, s):
