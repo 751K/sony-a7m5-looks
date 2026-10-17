@@ -6,6 +6,9 @@ come from the disassembly, not from Ghidra's flat C:
 
   +0x148 storage type   <- raw SubIFD tag 0x115 (SamplesPerPixel)
   +0x14c sample format  <- raw SubIFD tag 0x153 (SampleFormat), default 1
+  decoder rect (vt+0x88) <- raw SubIFD 0xc61f DefaultCropOrigin +
+                           0xc620 DefaultCropSize  (-> (12, 8, 7020, 4680) for
+                           DSC03591; lens correction's centre and shift use it)
   +0x1f8 ISO            <- Exif 0x8827; if absent/0xffff, SensitivityType
                            0x8830 selects 0x8831 (types 1,4,5,6,7),
                            0x8832 (type 2) or 0x8833 (type 3)
@@ -73,6 +76,24 @@ def _raw_ifd(buf: bytes, ifd0: dict) -> dict:
     return ifd0
 
 
+def _rect_from_raw(buf: bytes, raw: dict):
+    """(rect, origin, size, (image width, height)) from the raw SubIFD."""
+    img_w, img_h = _get(buf, raw, 0x100, 0), _get(buf, raw, 0x101, 0)
+    origin = _vals(buf, raw[0xC61F])[:2] if 0xC61F in raw else (0, 0)
+    size = _vals(buf, raw[0xC620])[:2] if 0xC620 in raw else (img_w, img_h)
+    rect = (origin[0], origin[1], origin[0] + size[0], origin[1] + size[1])
+    return rect, tuple(origin), tuple(size), (img_w, img_h)
+
+
+def crop_rect(arw) -> tuple:
+    """Decoder rectangle (vtable+0x88): DefaultCropOrigin (0xc61f) plus
+    DefaultCropSize (0xc620) from the raw SubIFD. Full frame for DSC03591 is
+    (12, 8, 7020, 4680); APS-C/cropped files give their own rectangle."""
+    buf = Path(arw).read_bytes()
+    ifd0 = _ifd(buf, struct.unpack_from("<I", buf, 4)[0])
+    return _rect_from_raw(buf, _raw_ifd(buf, ifd0))[0]
+
+
 def _maker_ifd(buf: bytes, exif: dict) -> tuple[dict, int]:
     """Sony maker note. 0x927c points at the IFD entry count, 12 bytes after
     the 'SONY DSC \\0\\0\\0' header; out-of-line values are relative to it."""
@@ -114,6 +135,7 @@ def decoder_params(arw) -> dict:
 
     storage = _get(buf, raw, 0x115, 0)
     sample_format = _get(buf, raw, 0x153, 1)
+    rect, origin, size, image_size = _rect_from_raw(buf, raw)
 
     iso = _get(buf, exif, 0x8827, 0xFFFF)
     if iso == 0xFFFF:
@@ -125,7 +147,9 @@ def decoder_params(arw) -> dict:
     present = all(t in maker for t in (0x2033, 0x2032, 0x2034, 0x2006, 0x2036, 0x2005, 0x2035))
     out = dict(iso=iso, f0=1 if storage == 4 else 0, d14c=sample_format,
                d1b0=0, f22780=1.0, f22784=1.0,
-               storage=storage, mode=2 if present else 1, d1a0=m(0x2004))
+               storage=storage, mode=2 if present else 1, d1a0=m(0x2004),
+               rect=rect, crop_origin=tuple(origin), crop_size=tuple(size),
+               image_size=image_size)
     if present:
         out.update(d1a4=_lookup("be0c8", m(0x2033)),
                    d1a8=_lookup("be0c8", m(0x2032)),

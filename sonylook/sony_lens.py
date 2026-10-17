@@ -165,22 +165,34 @@ def lens_struct_from_tags(dist, ca_r, ca_b, rect, p5=1, look8=0, dist_on=True, c
                 off=[offR, (f32(0.0), f32(0.0)), offB])
 
 
-def lens_from_arw(arw, rect=None, dist_setting=-1, ca_setting=1, p5=1, f0=False, zoom2=False):
+def lens_from_arw(arw, rect=None, dist_setting=None, ca_setting=None, p5=1, f0=False, zoom2=False):
     """Lens struct for an ARW.
 
     SR2 0x7984 (distortion), 0x7980 (CA), 0x7922 (crop width/height), 0x7983 (mode:
     0x7983[1] == 16 full frame, 11 APS-C -> look+8), 0x78a2/0x78a3 (lens shift).
-    rect: decoder effective rectangle (vt+0x88); None uses (0, 0, 0x7922 width/height),
-    which is exact for full-frame.  dist_setting/ca_setting are dev+0x278/+0x27c
-    (settings 0x8040 / 0x900d; -1 = auto, on).
+    rect: decoder effective rectangle (vt+0x88); None uses
+    decoder_params.crop_rect(arw) = DefaultCropOrigin (0xc61f) + DefaultCropSize (0xc620),
+    which is exact for cropped modes too.  dist_setting/ca_setting are dev+0x278/+0x27c
+    (settings 0x8040 / 0x900d); None reads them from an Edit-saved ARW's develop
+    settings, falling back to -1 (auto/on) and 1 (on).
     """
     import sr2
+    if dist_setting is None or ca_setting is None:
+        import develop_settings as DS
+        st = DS.read_settings(arw)
+        if dist_setting is None:
+            dist_setting = int(st.get(DS.DISTORTION, -1))
+        if ca_setting is None:
+            ca_setting = int(st.get(DS.CA_CORRECTION, 1))
     tags = sr2.sr2_subifd(str(arw))
     dist = tags[0x7984][1][1:]
     ca = tags[0x7980][1][1:]
     half = len(ca) // 2
     crop = tuple(tags[0x7922][1][:2])
-    rect = tuple(rect) if rect is not None else (0, 0, crop[0], crop[1])
+    if rect is None:
+        import decoder_params as DP
+        rect = DP.crop_rect(arw)
+    rect = tuple(rect)
     mode = tags[0x7983][1][1]
     look8 = 2 if mode == 11 else 1 if mode == 16 else 0
     return lens_struct_from_tags(dist, ca[:half], ca[half:], rect, p5=p5, look8=look8,

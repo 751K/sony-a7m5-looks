@@ -59,19 +59,34 @@ def load_looks(arw):
     return out
 
 
-def front_end_sony(arw, scale=8, lens=True, dro=False, wb_mode=None, temperature=None,
-                   tint=0, exposure=0, rb_factor=0):
+def front_end_sony(arw, scale=8, lens=True, dro=None, wb_mode=None, temperature=None,
+                   tint=None, exposure=None, rb_factor=None):
     """Sony black level / WB / 0x7311 scaling (sony_frontend.py), CFA block-averaged by `scale`.
 
     Output is white-balanced camera RGB on Sony's int16 scale: no exposure fit, no matrix.
-    wb_mode None keeps the as-shot white balance; 2 = colour temperature (Kelvin);
-    tint / exposure / rb_factor are dev settings 0x8014 / 0x8018 / 0x8015."""
+    None means "read from the ARW's develop settings when Edit saved it, else default":
+    wb_mode 0x8002 (1 as shot, 2 colour temperature), temperature 0x8013, tint 0x8014,
+    exposure 0x8018, rb_factor 0x8015, dro 0x8022.  Explicit arguments override."""
     import rawpy
     import sony_frontend as F
+    import develop_settings as DS
+    st = DS.read_settings(arw)
+    if wb_mode is None:
+        wb_mode = int(st.get(DS.WB_MODE, 1))
+    if temperature is None:
+        temperature = st.get(DS.WB_TEMPERATURE, 6000)
+    if tint is None:
+        tint = int(st.get(DS.WB_TINT, 0))
+    if exposure is None:
+        exposure = int(st.get(DS.EXPOSURE, 0))
+    if rb_factor is None:
+        rb_factor = int(st.get(DS.RB_FACTOR, 0))
+    if dro is None:
+        dro = int(st.get(DS.DRO_ON, 0)) == 1
     main = AL.main_tags(arw)
     black = ints(main["0x7310"])                                        # BlackLevel
     gains = F.wb_gains(ints(main["0x7313"]), int(main["0x7809"]), tint, exposure,
-                       mode=1 if wb_mode is None else wb_mode, temperature=temperature,
+                       mode=wb_mode, temperature=temperature,
                        temp_table=F.wb_temperature_table(main), presets=F.wb_presets(main),
                        rb_factor=rb_factor)                             # WB_RGGBLevels
     s7311 = int(main["0x7311"])

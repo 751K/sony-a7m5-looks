@@ -515,7 +515,7 @@ LUT 构建 `FUN_1000c7120`：
 
 **镜头结构 L = render+0x18**：由 `FUN_1000d58f0` 生成。0x7983 = (17, 16) 使 look+0x12fc/0x12fe ≠ −1，于是走模式 1（`FUN_1000d65a0` + `FUN_1000d69b4`）。
 - **表**：G[i] = (float)(1 + 0x7984[i]·2⁻¹⁵)（19 个节点）。R、B = G·(1 + CA·2⁻²¹)，CA 分别取 0x7980 的前 16 和后 16 个值，下标大于 15 时取最后一个。畸变开关 dev+0x278，色差开关 dev+0x27c（0x900d）。
-- **几何**：中心 = 解码器矩形（vt+0x88）的整数半宽/半高 / p5（导出时 p5 = 1）；全画幅下与 0x7922 的宽高一致。节点间距 = 半对角线 / (k·p5)，k = 21.63（APS-C 为 14.2）× 0.69348127，即每节点约 1.44 mm 像高，本图为 280.75 px。
+- **几何**：中心 = 解码器矩形（vt+0x88）的整数半宽/半高 / p5（导出时 p5 = 1）。矩形由 `decoder_params.crop_rect(arw)` 从 RAW SubIFD 0xc61f（DefaultCropOrigin）+ 0xc620（DefaultCropSize）读出，全画幅为 (12, 8, 7020, 4680)。节点间距 = 半对角线 / (k·p5)，k = 21.63（APS-C 为 14.2）× 0.69348127，即每节点约 1.44 mm 像高，本图为 280.75 px。
 - **画幅与偏移**：look+8 由 0x7983[1] 决定（16 → 全画幅 21.63，11 → APS-C 14.2）；L+0x2c..0x38 由 0x78a2（look+0x12e8..）、0x78a3（look+0x12f0）和矩形/0x7922 的宽高计算（f0 且 FUN_1000bd904 == 0x10 时 dx/dy 加倍）。本文件 0x78a2 = 0，偏移为 0。
 - **开关**：畸变 dev+0x278（0x8040）、色差 dev+0x27c（0x900d），经 FUN_1000aed68/aed80；−1（自动）和 1 为开，0/2/3 等为关。`lens_from_arw` 用 `dist_setting` / `ca_setting` 传入，默认 −1 / 1。
 - **缩放 s**：在角落查 G 表。若 G < 1，则从短半边向外搜索第一个 `G(x)·y > hy` 的 y，s = (y − 0.5)/hy；否则从半对角线向内搜索。本图 s = **1.019050**（放大约 1.9% 填满画面）。
@@ -843,8 +843,10 @@ Marble、RawNR、锐化和 Spica 要读的 `ZcARW` 字段，现在由 `sonylook/
 | +0x1f8 ISO | Exif 0x8827；缺失或为 0xffff 时，由 SensitivityType（0x8830）选 0x8831（类型 1/4/5/6/7）、0x8832（类型 2）或 0x8833（类型 3） | vtable+0xe8；Marble、RawNR、锐化、Spica 的 ISO 分段 |
 | +0x19c…+0x1bc | Sony 厂商注释 0x2004–0x2006、0x2032–0x2036，经 `FUN_1000a2b74` 和 5 张小查找表（`FUN_1000be0c8/be0f0/be110/be138/be158`，表本身从用户安装的 Edit 中读取） | +0x1b0 是 `FUN_100129470` 的档位上限，本图为 10 |
 | +0x22780 / +0x22784 | 构造函数缺省值 1.0，ARW 路径不改写 | Marble 强度系数 |
+| 解码器矩形（vt+0x88） | RAW SubIFD 0xc61f DefaultCropOrigin + 0xc620 DefaultCropSize | 镜头校正的中心、节点间距和 R/B 偏移；另有 `crop_rect(arw)` |
 
-- **验证**（研究工作区的 `verify_decoder_params.py`）：Sony 自己的解析器在模拟器里打开 ARW 后读出这些字段，再与 Python 结果比较。12 张 A7M5 ARW 全部一致：DSC03591、DSC05651，加上一组 ISO 100 / 800 / 3200 / 6400 / 8000 / 16000 / 40000 / 51200 / 102400 / 204800 的无损压缩 RAW（DSC05740–05749）。
+- **解码器矩形**：`crop_rect(arw)` 返回 `(x0, y0, x1, y1)`（上表 0xc61f + 0xc620）；`sony_lens.lens_from_arw` 默认用它，所以非全画幅/裁切文件也能拿到正确矩形。全画幅为 (12, 8, 7020, 4680)，与 0x7922 的宽高一致。
+- **验证**（研究工作区的 `verify_decoder_params.py`）：Sony 自己的解析器在模拟器里打开 ARW 后读出这些字段（矩形通过 vt+0x88 的 sret 缓冲区），再与 Python 结果比较。12 张 A7M5 ARW 全部一致：DSC03591、DSC05651，加上一组 ISO 100 / 800 / 3200 / 6400 / 8000 / 16000 / 40000 / 51200 / 102400 / 204800 的无损压缩 RAW（DSC05740–05749）。
 - ISO 102400 和 204800 两张的 0x8827 = 65535，SensitivityType = 2，所以走的是回退路径，读 0x8832。
 - A7M5 拍不出存储类型 4 的文件（像素偏移合成），所以 `f0 = 1` 在本机型上不会触发，只在模拟器里验证过（§10.16）。厂商注释缺失时的缺省值也没有真实文件可测。
 - `fullres_nr.py`、`fullres_sscs.py` 改用 `decoder_params()` 后，输出和改动前完全相同。
@@ -877,3 +879,41 @@ Marble、RawNR、锐化和 Spica 要读的 `ZcARW` 字段，现在由 `sonylook/
   - model_id = 0 的分支（改用 look+0x58 / +0x5c）没有测到。
   - 非 RGGB 排列会报 NotImplementedError。
   - Edit 界面点击位置到 RAW 坐标的换算（`FUN_1000d3438`）没有移植，所以 `wb_pick_gains` 目前直接接收 RAW 坐标。
+
+### 10.24 显影设置：直接从 Edit 保存的 ARW 读取（2026-10-17）
+
+Edit 导出时会把当前和初始显影设置追加在 ARW 末尾（4.0.00.10312 为 1630 字节）。
+`sonylook/develop_settings.py` 解析这个块：
+
+- **定位**：在文件末尾搜索 3 项头（`0xd000` 版本 1、`0xd001` 两个 IFD 偏移）；
+  两个 IFD 分别是“当前”和“初始”，偏移相对块起点。
+- **条目**：`{设置 ID, 类型, count, 值}`；类型 3 = SHORT、4 = LONG、9 = SLONG；
+  count > 1 时值在块内偏移处。
+- `read_settings(arw)` 返回当前设置字典；相机原始写入、未经 Edit 保存的 ARW 返回 `{}`。
+- 另提供 `read_settings_pair()`（当前 + 初始）和 `marble_dev()`。
+
+| 设置 | dev 字段 | 用途 |
+| --- | --- | --- |
+| 0x8002 | +0x1e8 | 白平衡模式 |
+| 0x8013 | +0x1ec | 色温（16 位） |
+| 0x8014 | +0x1f0 | 色调 |
+| 0x8015 | +0x1f4 | R/B 系数 |
+| 0x8018 | +0x1f8 | 曝光补偿（1/300 EV） |
+| 0x801e | +0x218 | 降噪 / Marble 插入 |
+| 0x8029 | +0x224 | Marble 强度 |
+| 0x8022 | +0x238 | DRO |
+| 0x8040 | +0x278 | 畸变校正（−1 自动、1 开、0/2/3 关） |
+| 0x900d | +0x27c | 色差校正 |
+| 0x901c | +0x2c0 | 清晰度（Marble 强度） |
+
+接线：
+
+- `front_end_sony(..., dro=None, wb_mode=None, temperature=None, tint=None, exposure=None, rb_factor=None)`：
+  None 时读 ARW 设置，缺失或原始文件用旧默认；显式参数仍可覆盖。
+- `lens_from_arw(..., dist_setting=None, ca_setting=None)`：读 0x8040 / 0x900d，
+  缺失回退 −1 / 1。
+- `marble_dev(settings)` 返回 `{d218, d224, d2c0}`。
+
+**验证**（研究工作区的 `verify_develop_settings.py`）：保存文件 `Sony/DSC03591.ARW`
+（原始 + 1630 B）的当前/初始设置、原始文件返回空、`marble_dev`、镜头 CA/畸变开关
+（改写块内值）以及前端默认行为，**9/9 通过**。原始参考 ARW 的默认输出与改动前相同。
