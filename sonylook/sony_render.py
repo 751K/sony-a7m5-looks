@@ -59,15 +59,21 @@ def load_looks(arw):
     return out
 
 
-def front_end_sony(arw, scale=8, lens=True, dro=False):
+def front_end_sony(arw, scale=8, lens=True, dro=False, wb_mode=None, temperature=None,
+                   tint=0, exposure=0, rb_factor=0):
     """Sony black level / WB / 0x7311 scaling (sony_frontend.py), CFA block-averaged by `scale`.
 
-    Output is white-balanced camera RGB on Sony's int16 scale: no exposure fit, no matrix."""
+    Output is white-balanced camera RGB on Sony's int16 scale: no exposure fit, no matrix.
+    wb_mode None keeps the as-shot white balance; 2 = colour temperature (Kelvin);
+    tint / exposure / rb_factor are dev settings 0x8014 / 0x8018 / 0x8015."""
     import rawpy
     import sony_frontend as F
     main = AL.main_tags(arw)
     black = ints(main["0x7310"])                                        # BlackLevel
-    gains = F.wb_gains(ints(main["0x7313"]), int(main["0x7809"]))       # WB_RGGBLevels
+    gains = F.wb_gains(ints(main["0x7313"]), int(main["0x7809"]), tint, exposure,
+                       mode=1 if wb_mode is None else wb_mode, temperature=temperature,
+                       temp_table=F.wb_temperature_table(main), presets=F.wb_presets(main),
+                       rb_factor=rb_factor)                             # WB_RGGBLevels
     s7311 = int(main["0x7311"])
     with rawpy.imread(str(arw)) as r:
         assert r.raw_pattern.tolist() == [[0, 1], [3, 2]] and r.color_desc == b"RGBG"
