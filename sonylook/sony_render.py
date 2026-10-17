@@ -4,12 +4,14 @@
     RAW --(raw-0x7310 black)*0x7311*WB_RGGBLevels*(0x7809/256)/2^19 --ITP--> --GeoCorr(0x7984/0x7980)--> (front_end_sony)--> camera RGB (int16 scale)
         --LinearMatrix16(0x780f, works directly on WB'd camera RGB)--> --MainGamma(0x7805/0x7806)-->
         --RGB2YCC(0x7842+0x7844, 0x7801)--> --AreaComp--> --ChromaSuppress(0x787e-0x7881)-->
-        --YGamma(0x780c/d knee, 0x780e gain)--> --YCC2RGB--> [Effect: BW / Sepia only] --> 14-bit encoded RGB
+        --YGamma(0x780c/d knee, 0x780e gain)--> --YCC2RGB--> [Marble] --> [Effect: BW / Sepia only] --> 14-bit encoded RGB
+    optional, both bit-exact: RawNR on the raw before ITP (sony_rawnr.py, setting 0x801e = 1) and
+    Marble after YCC2RGB (sony_marble.py, 0x801e = 1 or 0x901c != 0); both are spatial, never in LUTs.
 
 All look parameters come from the ARW itself (arw_looks.py); constant tables from the user's own
 Imaging Edge Edit install (edit_binary.py).
-Not Sony: the demosaic interpolation (CFA samples are block-averaged instead), and SSCS (near-clip
-highlights), YNR and Marble (low-frequency chroma NR), which are not ported.
+Not Sony: the demosaic interpolation (CFA samples are block-averaged instead) and SSCS (near-clip
+highlights). YNR and the YCC NR task FUN_1000b83e8 are not inserted for this camera (README 10.15).
 
 usage: sony_render.py ARW LOOK [LOOK ...] [--scale N] [--out DIR]
 """
@@ -124,9 +126,11 @@ class Look:
                                          SS.inverse_lut_positive(self.ylut), SS.inverse_lut_centered(self.gamma),
                                          self.gamma[0x8000:], self.ylut)
 
-    def render(self, lin, detail=None, pointwise=False):
+    def render(self, lin, detail=None, pointwise=False, marble=None):
         """detail: None, or dict(sharp=sony_detail.sharpness_params(...), spica=(table, params)) to run
-        ZcTaskSharpness / ZcTaskSpica on the full array (only meaningful at full resolution)."""
+        ZcTaskSharpness / ZcTaskSpica on the full array (only meaningful at full resolution).
+        marble: None, or dict(look=sony_marble.Look, dev=dict(d218, d224, d2c0), dec=...) to run
+        ZcTaskMarble after YCC2RGB; the outer 16 px of the array are then not valid."""
         atan, _ = SL.load_static_tables()
         planes = [np.ascontiguousarray(lin[..., c], np.float32) for c in range(3)]
         # pointwise=True: LM16 hue index from the pixel itself instead of the 3-tap row blur
@@ -146,6 +150,10 @@ class Look:
             import sony_detail as SDT
             y = SDT.spica(np.asarray(y, np.uint16), (0, 0, w, h), *detail["spica"])
         r, g, b = SY.ycc2rgb(y, cr, cb)
+        if marble is not None:
+            import sony_marble as MB
+            (r, g, b), _ = MB.marble(*(np.asarray(c, np.uint16) for c in (r, g, b)), marble["look"], marble["dev"],
+                                     marble["dec"], mode=0)
         if self.look_id & ~1 == 0x10:      # render+0x44 = 0: sRGB output
             r, g, b = EF.effect_apply(*(np.asarray(c, np.uint16) for c in (r, g, b)), self.look_id, self.tint, mode=0)
         return np.stack([r, g, b], -1).astype(np.int32)                    # 0..16383 encoded
