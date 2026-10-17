@@ -12,4 +12,3 @@ render_output/
 *.tiff
 chart/measure_*.json
 chart/*.npy
-experimental/

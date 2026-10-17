@@ -41,9 +41,11 @@ u = np.linspace(0, 1, G)
 lin_axis = 16383 * u ** 2
 grid = np.stack(np.meshgrid(lin_axis, lin_axis, lin_axis, indexing="ij"), -1).reshape(1, -1, 3)   # R slowest
 looks = R.load_looks(ARW)
+import sony_sscs as SC
+sscs = SC.params_from_arw(ARW)                                   # same as the profiles (since v1.1.0)
 names = [n for n in looks if n not in ("_main", "Standard")]
 for n in names:
-    out = R.Look(n, looks).render(grid, pointwise=True)[0] / 64.0
+    out = R.Look(n, looks, sscs=sscs).render(grid, pointwise=True)[0] / 64.0
     np.clip(np.round(out), 0, 255).astype(np.uint8).tofile(OUT / "luts" / f"{n}.bin")
 
 # check: client-side path (normalise, as-shot WB, LUT) vs the reference renderer
@@ -53,7 +55,7 @@ uu = np.sqrt(np.clip(n * CLIP / 16383, 0, 1))
 lut = np.fromfile(OUT / "luts" / "ST.bin", np.uint8).reshape(G, G, G, 3).astype(np.float64)
 pts = uu.reshape(-1, 3)
 pred = np.stack([RegularGridInterpolator((u, u, u), lut[..., c])(pts) for c in range(3)], -1).reshape(*blk.shape[:2], 3)
-ref = R.Look("ST", looks).render(R.front_end_sony(ARW, S, lens=False)) / 64.0
+ref = R.Look("ST", looks, sscs=sscs).render(R.front_end_sony(ARW, S, lens=False)) / 64.0
 print("LUT path vs renderer, 8-bit MAE:", round(float(np.abs(pred - ref).mean()), 3))
 
 # 3) demosaiced version of the mosaic crop (same window as raw_bayer.png, same sqrt display)

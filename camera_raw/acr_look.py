@@ -2,7 +2,7 @@
 """Sony look RGBTables for Camera Raw (on 'SonyA7M5 Linear Base').
 
 Node v (ProPhoto gamma 1.8, the table input) -> Sony linear = acr_encoding.inverse(v) (clamped at sensor
-clip) -> verified look chain (pointwise) -> sRGB -> XYZ D50 -> linear ProPhoto -> gamma 1.8.
+clip) -> SSCS (sony_sscs, float path) -> verified look chain (pointwise) -> sRGB -> XYZ D50 -> linear ProPhoto -> gamma 1.8.
 usage: acr_look.py ARW [--grid 64] [--looks Standard,FL2,...] [--write] [--eval]
 """
 import argparse
@@ -81,15 +81,14 @@ def main():
     ap.add_argument("--looks", default=",".join(C.NAMES))
     ap.add_argument("--eval", action="store_true")
     ap.add_argument("--write", action="store_true")
-    ap.add_argument("--sscs", action="store_true",
-                    help="experimental: include Sony's SSCS decoder stage; files get an ' SSCS' suffix")
+    ap.add_argument("--no-sscs", action="store_true",
+                    help="leave out Sony's SSCS stage (bright, saturated colours towards luma; in since v1.1.0)")
     ap.add_argument("--out", help="output folder (default profiles/camera_raw)")
     a = ap.parse_args()
     if a.out:
         A.OUT = Path(a.out)
     looks = R.load_looks(a.arw)
-    sscs = SC.params_from_arw(a.arw) if a.sscs else None
-    suffix = " SSCS" if a.sscs else ""
+    sscs = None if a.no_sscs else SC.params_from_arw(a.arw)
     lin = R.front_end_sony(a.arw, 4) if a.eval else None
     if a.write:
         A.OUT.mkdir(exist_ok=True); A.write_base()
@@ -105,7 +104,7 @@ def main():
                 e = np.abs(got - ref) * 255
                 msg += f"  {mode}: MAE {e.mean():.3f} p99 {np.percentile(e, 99):.2f}"
         if a.write:
-            msg += "  " + A.write_look(f"Look {C.NAMES[name]}{suffix}", tab).name
+            msg += "  " + A.write_look(f"Look {C.NAMES[name]}", tab).name
         print(msg, flush=True)
 
 

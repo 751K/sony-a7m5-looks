@@ -22,6 +22,7 @@ Each profile was rendered from the same ARW and compared with Edit's export of t
 - **Global colour shift:** ΔE₀₀ < 0.4, with chroma difference ΔC* of −0.28 in Capture One and −0.01 in Camera Raw. Neither is visible.
 - **Edges and fine texture:** the remaining differences are here. They come from each program's own demosaicing and sharpening, not from the look.
 - **Synthetic chart:** profile vs. Sony look target is 0.10–0.15 for Capture One and 0.14 for Camera Raw (64³ table).
+- **Bright, saturated colours (v1.1.0):** the profiles now include Sony's SSCS stage, which pulls bright, saturated colours towards their luma. On the ~5% of DSC03591 that it touches, ST's colour error against Edit drops from 0.64 to 0.16 in Capture One and from 0.61 to 0.33 in Camera Raw.
 - **Coverage:** only ST, FL2 and FL3 have Edit exports to compare against; the other nine looks run through the same verified code with their own data but have not been checked against a Sony rendering. The FL2/FL3 numbers above are for Fade 0, which is what Edit uses for them. Since v1.0.2 the profiles apply the camera's default Fade (FL2/FL3 = 1, IN = 3, SH = 6), which Edit omits for FL2/FL3. That change has not yet been checked against in-camera JPEGs.
 
 ## Installation
@@ -81,7 +82,7 @@ Further points:
 - The Python implementation (`sonylook/`) is bit-exact against the original program. This was verified against the output of the original ARM64 code run under emulation.
 - Each look is rendered with the camera's default Creative Look settings. Contrast, highlights, shadows and saturation are 0 for all twelve; Fade is 1 for FL2/FL3, 3 for IN and 6 for SH.
 - Sharpening, noise reduction, clarity and DRO depend on neighbouring pixels, so they are not per-pixel mappings and are left out of the profiles.
-- SSCS (bright, saturated colours pulled towards their luma) is ported (`sonylook/sony_sscs.py`) but not yet applied in the profiles. Edit's 3D LUT and hue/saturation stages are off at default settings.
+- The profiles also include SSCS (`sonylook/sony_sscs.py`). Strictly speaking it is a decoder stage that runs before the look, but it is per pixel and improves both hosts (see above). Edit's 3D LUT and hue/saturation stages are off at default settings.
 
 ### 2. Lookup-table representation
 
