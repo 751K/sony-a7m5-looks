@@ -38,6 +38,10 @@ MAIN_TAGS = ("0x7841", "0x7847", "0x7848", "0x780b", "0x787e", "0x787f", "0x7880
 
 LOOK_IDS = {"Standard": 2, "ST": 2, "Vivid": 4, "Neutral": 7, "Portrait": 8, "BW": 0x10, "Sepia": 0x11,
             "FL": 0x12, "VV2": 0x13, "IN": 0x14, "SH": 0x15, "FL2": 0x16, "FL3": 0x17}   # table 0x1002c31e8
+# Camera default Fade per look (A7M5 Creative Look menu). Dev+0x2bc = 10 x Fade drives the YGamma offset
+# (0x780b) and gain (0x780e). Edit's default table (0x1002e8214) agrees for IN / SH but has no FL2 / FL3
+# rows, so Edit renders those two with Fade 0 while the camera uses 1.
+CAMERA_FADE = {"IN": 3, "SH": 6, "FL2": 1, "FL3": 1}
 
 
 def ints(s):
@@ -89,7 +93,8 @@ def box(img, s):
 
 
 class Look:
-    def __init__(self, name, looks):
+    def __init__(self, name, looks, fade=None):
+        """fade: Creative Look Fade slider 0..9; None = the camera default for this look."""
         g = looks[name]
         self.name = name
         MAIN = self.main = looks["_main"]
@@ -103,9 +108,11 @@ class Look:
         knee, slope = int(g.get("0x780c", 0)), int(g.get("0x780d", 0))
         _, self.ylut = SS.build_ygamma([i << 2 for i in range(512)], False, 0, 0, 0, knee, slope, 0,
                                        [0] * 512, [0] * 512, 0, 0)
+        self.fade = CAMERA_FADE.get({"Standard": "ST"}.get(name, name), 0) if fade is None else int(fade)
         t780e = ints(g.get("0x780e", "16384 " * 10))
-        self.ygain = float(np.float32(np.float32(SS.ygamma_gain_raw(1, t780e, 0)) * np.float32(6.1035156e-05)))
-        self.yoff = SS.ygamma_offset(1, ints(MAIN["0x780b"]), 0)
+        level = 10 * self.fade
+        self.ygain = float(np.float32(np.float32(SS.ygamma_gain_raw(1, t780e, level)) * np.float32(6.1035156e-05)))
+        self.yoff = SS.ygamma_offset(1, ints(MAIN["0x780b"]), level)
         # ChromaSuppress, exact (FUN_1000d50f8 -> FUN_1000e6da0): thresholds go through the inverse
         # tone tables render+0x89962 (inverse YGamma LUT) / +0x69962 (inverse MainGamma LUT), the
         # exposure factor render+0x18ee = exp2(EV/300)*64, then forward MainGamma + YGamma LUT
