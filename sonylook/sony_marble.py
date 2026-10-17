@@ -211,7 +211,8 @@ def _binom3(p, nw, nh, a):
 
 
 def marble(r, g, b, look, dev, dec, region=None, mode=0):
-    """r, g, b: uint16 planes (YCC2RGB output, sRGB-encoded for mode 0). look: Look. dev: dict(d218, d224, d2c0).
+    """r, g, b: uint16 planes (YCC2RGB output, sRGB-encoded for mode 0, AdobeRGB/gamma-2.2 for
+    mode 1; both from render+0x44). look: Look. dev: dict(d218, d224, d2c0).
     dec: dict(iso, f0, d14c, f22780, f22784, d1b0) or None. Returns (r, g, b) and the valid region (shrunk by 16).
     Pixels outside the valid region are not meaningful (Sony leaves them unwritten)."""
     H, W = np.shape(r)

@@ -30,8 +30,11 @@ def fma(a, b, c):
     Python has no hardware fma; the double intermediate is exact for the
     product and nearly always exact for the sum.  verify_itp.py catches the
     rare double-rounding case and this can be replaced by an exact version.
+    The sum is accumulated in place to save a full-size temporary.
     """
-    return np.add(np.multiply(a, b, dtype=np.float64), c, dtype=np.float64).astype(np.float32)
+    out = np.multiply(a, b, dtype=np.float64)
+    out += c
+    return out.astype(np.float32)
 
 
 class Plane:
@@ -122,13 +125,15 @@ def weighted_sum(src: Plane, x: int, y: int, center_dx: int) -> np.float32:
     return f32(s + f32(g(y, x + center_dx) * f32(36.0)))
 
 
-def _weighted_sum_row(p: np.ndarray, y: int, X: np.ndarray, center_dx: int) -> np.ndarray:
-    """Vector form of weighted_sum for one row; `p` is src padded by 5 px."""
-    Y = y + 5
-    Xp = X + 5
+def _s(sl: slice, off: int) -> slice:
+    """The same step-2 range shifted by `off` (row or column)."""
+    return slice(sl.start + off, sl.stop + off, sl.step)
 
+
+def _weighted_sum_rows(p: np.ndarray, rs: slice, cs: slice, center_dx: int) -> np.ndarray:
+    """Vector form of weighted_sum over a strided row/column block of `p` (padded by 5)."""
     def g(dy, dx):
-        return p[Y + dy, Xp + dx]
+        return p[_s(rs, 5 + dy), _s(cs, 5 + dx)]
 
     p12 = g(-2, 0);  p11 = g(-2, 1)
     p14 = g(-2, 3);  p13 = g(-2, 4)
@@ -158,38 +163,35 @@ def _weighted_sum_row(p: np.ndarray, y: int, X: np.ndarray, center_dx: int) -> n
     return s + (g(0, center_dx) * f32(36.0))
 
 
-def _fill_candidate_row(dst: Plane, src: Plane, p: np.ndarray, x0: int, x1: int,
-                        y: int, first: bool):
-    d = dst.data
-    d[y, x0] = src.data[y, x0]
-    d[y, x0 + 1] = src.data[y, x0 + 1]
-    X = np.arange(x0 + 2, x1 - 2, 2)
-    if X.size:
-        if first:
-            # assembly: both taps are scaled by 1/32 (the decompiler shows 1/88
-            # for the second tap, but the fmul uses s8 = 0x3d000000)
-            d[y, X] = _weighted_sum_row(p, y, X, 0) * K1_32
-            d[y, X + 1] = _weighted_sum_row(p, y, X + 1, 2) * K1_32
-        else:
-            d[y, X] = _weighted_sum_row(p, y, X, 2) * K1_88
-            d[y, X + 1] = _weighted_sum_row(p, y, X + 1, 0) * K1_88
-        xend = int(X[-1]) + 2
-    else:
-        xend = x0 + 2
-    d[y, xend] = src.data[y, x0 + 2]
-    d[y, xend + 1] = src.data[y, x0 + 3]
-
-
 def fill_candidates(dst: Plane, src: Plane, roi: ROI):
     """+0xa8 / 0x1000f2970.  Fill even/odd rows from the two weighted sums.
 
     Row pairs: (y, y+1), then y += 2, for y in [y0+2, y1-2).
+    The two row parities are processed as strided blocks (same sum tree).
     """
     x0, y0, x1, y1 = roi
     p = np.pad(src.data, 5)                     # Sony's getter sees 0 outside
-    for y in range(y0 + 2, y1 - 2, 2):
-        _fill_candidate_row(dst, src, p, x0, x1, y, True)
-        _fill_candidate_row(dst, src, p, x0, x1, y + 1, False)
+    d, sd = dst.data, src.data
+    cs = slice(x0 + 2, x1 - 2, 2)
+    cs1 = slice(x0 + 3, x1 - 1, 2)
+    rs0 = slice(y0 + 2, y1 - 2, 2)
+    rs1 = slice(y0 + 3, y1 - 1, 2)
+    xs = np.arange(x0 + 2, x1 - 2, 2)
+    if xs.size:
+        xend = int(xs[-1]) + 2
+        # even rows (first=True): both taps scaled by 1/32
+        d[rs0, cs] = _weighted_sum_rows(p, rs0, cs, 0) * K1_32
+        d[rs0, cs1] = _weighted_sum_rows(p, rs0, cs1, 2) * K1_32
+        # odd rows (first=False): 1/88
+        d[rs1, cs] = _weighted_sum_rows(p, rs1, cs, 2) * K1_88
+        d[rs1, cs1] = _weighted_sum_rows(p, rs1, cs1, 0) * K1_88
+    else:
+        xend = x0 + 2
+    for rs in (rs0, rs1):
+        d[rs, x0] = sd[rs, x0]
+        d[rs, x0 + 1] = sd[rs, x0 + 1]
+        d[rs, xend] = sd[rs, x0 + 2]
+        d[rs, xend + 1] = sd[rs, x0 + 3]
 
 
 K9_A = np.array([-0.0625, 0.0, 0.25, 0.0, 0.625, 0.0, 0.25, 0.0, -0.0625], np.float32)
@@ -219,23 +221,27 @@ def nine_tap(outA: Plane, outB: Plane, src: Plane, roi: ROI,
     Row y uses source rows y-4..y+4: outB gets the vertical filter, outA the
     horizontal one; even x uses k2, odd x uses k1.
     Row y+1 uses rows y-3..y+5 with the kernels swapped.
+    The two row parities are processed as strided blocks (same fma order).
     """
     x0, y0, x1, y1 = roi
     s = src.data
     A, B = outA.data, outB.data
-    X = np.arange(x0 + 4, x1 - 4, 2)
-    X1 = X + 1
-    if X.size == 0:
+    cs = slice(x0 + 4, x1 - 4, 2)
+    cs1 = slice(x0 + 5, x1 - 3, 2)
+    rs0 = slice(y0 + 4, y1 - 4, 2)
+    rs1 = slice(y0 + 5, y1 - 3, 2)
+    if len(np.arange(cs.start, cs.stop, 2)) == 0:
         return
-    for y in range(y0 + 4, y1 - 4, 2):
-        B[y, X] = _dot9_vec(k2, [s[y - 4 + i, X] for i in range(9)])
-        A[y, X] = _dot9_vec(k2, [s[y, X - 4 + i] for i in range(9)])
-        B[y, X1] = _dot9_vec(k1, [s[y - 4 + i, X1] for i in range(9)])
-        A[y, X1] = _dot9_vec(k1, [s[y, X - 3 + i] for i in range(9)])
-        B[y + 1, X] = _dot9_vec(k1, [s[y - 3 + i, X] for i in range(9)])
-        A[y + 1, X] = _dot9_vec(k1, [s[y + 1, X - 4 + i] for i in range(9)])
-        B[y + 1, X1] = _dot9_vec(k2, [s[y - 3 + i, X1] for i in range(9)])
-        A[y + 1, X1] = _dot9_vec(k2, [s[y + 1, X - 3 + i] for i in range(9)])
+    # even rows
+    B[rs0, cs] = _dot9_vec(k2, [s[_s(rs0, -4 + i), cs] for i in range(9)])
+    A[rs0, cs] = _dot9_vec(k2, [s[rs0, _s(cs, -4 + i)] for i in range(9)])
+    B[rs0, cs1] = _dot9_vec(k1, [s[_s(rs0, -4 + i), cs1] for i in range(9)])
+    A[rs0, cs1] = _dot9_vec(k1, [s[rs0, _s(cs, -3 + i)] for i in range(9)])
+    # odd rows (y+1): kernels swapped
+    B[rs1, cs] = _dot9_vec(k1, [s[_s(rs1, -4 + i), cs] for i in range(9)])
+    A[rs1, cs] = _dot9_vec(k1, [s[rs1, _s(cs, -4 + i)] for i in range(9)])
+    B[rs1, cs1] = _dot9_vec(k2, [s[_s(rs1, -4 + i), cs1] for i in range(9)])
+    A[rs1, cs1] = _dot9_vec(k2, [s[rs1, _s(cs, -3 + i)] for i in range(9)])
 
 
 def _pair4(a, b, c, d):
@@ -248,6 +254,7 @@ def five_by_five(out: Plane, src: Plane, roi: ROI):
     Even output: 8 neighbours * -1/32 + 4 axial * 5/16.
     Odd output: 4 corners * -1/64 + 4 axial * -1/32 + 4 diagonals * 1/8
                 + centre * 11/16.
+    The two row parities are processed as strided blocks (same fma order).
     """
     x0, y0, x1, y1 = roi
     s = src.data
@@ -258,32 +265,37 @@ def five_by_five(out: Plane, src: Plane, roi: ROI):
     w18 = f32(0.125)
     w1116 = f32(0.6875)
 
-    def even_at(y, x):
-        e = [s[y - 2, x + 1], s[y - 2, x - 1], s[y - 1, x - 2], s[y - 1, x + 2],
-             s[y + 1, x - 2], s[y + 1, x + 2], s[y + 2, x - 1], s[y + 2, x + 1]]
-        sum8 = f32(f32(f32(f32(e[0] + e[1]) + f32(e[2] + e[3])) +
-                       f32(f32(e[4] + e[5]) + e[6])) + e[7])
-        c = [s[y, x - 1], s[y - 1, x], s[y, x + 1], s[y + 1, x]]
-        return fma(_pair4(*c), w516, f32(sum8 * neg32))
+    def even_at(rs, cs):
+        e = [s[_s(rs, -2), _s(cs, 1)], s[_s(rs, -2), _s(cs, -1)],
+             s[_s(rs, -1), _s(cs, -2)], s[_s(rs, -1), _s(cs, 2)],
+             s[_s(rs, 1), _s(cs, -2)], s[_s(rs, 1), _s(cs, 2)],
+             s[_s(rs, 2), _s(cs, -1)], s[_s(rs, 2), _s(cs, 1)]]
+        sum8 = ((((e[0] + e[1]) + (e[2] + e[3])) +
+                 ((e[4] + e[5]) + e[6])) + e[7])
+        c = [s[rs, _s(cs, -1)], s[_s(rs, -1), cs], s[rs, _s(cs, 1)], s[_s(rs, 1), cs]]
+        return fma(_pair4(*c), w516, (sum8 * neg32))
 
-    def odd_at(y, x):
-        corners = [s[y - 2, x + 2], s[y - 2, x - 2], s[y + 2, x - 2], s[y + 2, x + 2]]
-        axial = [s[y, x - 2], s[y - 2, x], s[y, x + 2], s[y + 2, x]]
-        diag = [s[y - 1, x + 1], s[y - 1, x - 1], s[y + 1, x - 1], s[y + 1, x + 1]]
+    def odd_at(rs, cs):
+        corners = [s[_s(rs, -2), _s(cs, 2)], s[_s(rs, -2), _s(cs, -2)],
+                   s[_s(rs, 2), _s(cs, -2)], s[_s(rs, 2), _s(cs, 2)]]
+        axial = [s[rs, _s(cs, -2)], s[_s(rs, -2), cs], s[rs, _s(cs, 2)], s[_s(rs, 2), cs]]
+        diag = [s[_s(rs, -1), _s(cs, 1)], s[_s(rs, -1), _s(cs, -1)],
+                s[_s(rs, 1), _s(cs, -1)], s[_s(rs, 1), _s(cs, 1)]]
         v = _pair4(*corners) * neg64
         v = fma(_pair4(*axial), neg32, v)
         v = fma(_pair4(*diag), w18, v)
-        return fma(s[y, x], w1116, v)
+        return fma(s[rs, cs], w1116, v)
 
-    X = np.arange(x0 + 2, x1 - 2, 2)
-    X1 = X + 1
-    if X.size == 0:
+    cs = slice(x0 + 2, x1 - 2, 2)
+    cs1 = slice(x0 + 3, x1 - 1, 2)
+    rs0 = slice(y0 + 2, y1 - 2, 2)
+    rs1 = slice(y0 + 3, y1 - 1, 2)
+    if len(np.arange(cs.start, cs.stop, 2)) == 0:
         return
-    for y in range(y0 + 2, y1 - 2, 2):
-        d[y, X] = even_at(y, X)
-        d[y, X1] = odd_at(y, X1)
-        d[y + 1, X] = odd_at(y + 1, X)
-        d[y + 1, X1] = even_at(y + 1, X1)
+    d[rs0, cs] = even_at(rs0, cs)
+    d[rs0, cs1] = odd_at(rs0, cs1)
+    d[rs1, cs] = odd_at(rs1, cs)
+    d[rs1, cs1] = even_at(rs1, cs1)
 
 
 def _err3(c, a, b):
@@ -353,14 +365,16 @@ def direction_map(out: Plane, src: Plane, roi: ROI, params: bytes):
 
     for ya in range(y0 + 4, y1 - 4, _DM_CHUNK):
         yb = min(ya + _DM_CHUNK, y1 - 4)
-        Y = np.arange(ya, yb)[:, None]
-        X = xs_all[None, :]
+
+        def at(A, dy, dx):
+            """Chunk block of A shifted by (dy, dx) (plain slices, no index arrays)."""
+            return A[ya + dy:yb + dy, x0 + 4 + dx:x1 - 4 + dx]
 
         # sum over D1: first four terms in float32, then fma(4x) and the
         # remaining four in double (assembly mixes s and d arithmetic)
-        t1 = D1[Y - 2, X - 1]; t2 = D1[Y - 2, X - 2]; t3 = D1[Y - 2, X]
-        t4 = D1[Y - 1, X - 2]; t5 = D1[Y - 1, X - 1]; t6 = D1[Y - 1, X]
-        t7 = D1[Y, X - 2]; t8 = D1[Y, X - 1]; t9 = D1[Y, X]
+        t1 = at(D1, -2, -1); t2 = at(D1, -2, -2); t3 = at(D1, -2, 0)
+        t4 = at(D1, -1, -2); t5 = at(D1, -1, -1); t6 = at(D1, -1, 0)
+        t7 = at(D1, 0, -2); t8 = at(D1, 0, -1); t9 = at(D1, 0, 0)
         tf = ((t1 + t2) + (t3 + t4)).astype(np.float32)
         d17 = tf.astype(np.float64) + 4.0 * t5.astype(np.float64)
         d18 = ((t6.astype(np.float64) + t7.astype(np.float64))
@@ -370,9 +384,9 @@ def direction_map(out: Plane, src: Plane, roi: ROI, params: bytes):
         f42 = np.fmax(f42, k2)
 
         # sum over D2
-        t1 = D2[Y - 2, X + 1]; t2 = D2[Y - 2, X]; t3 = D2[Y - 2, X + 2]
-        t4 = D2[Y - 1, X]; t5 = D2[Y - 1, X + 1]; t6 = D2[Y - 1, X + 2]
-        t7 = D2[Y, X]; t8 = D1[Y, X + 1]; t9 = D2[Y, X + 2]
+        t1 = at(D2, -2, 1); t2 = at(D2, -2, 0); t3 = at(D2, -2, 2)
+        t4 = at(D2, -1, 0); t5 = at(D2, -1, 1); t6 = at(D2, -1, 2)
+        t7 = at(D2, 0, 0); t8 = at(D1, 0, 1); t9 = at(D2, 0, 2)
         tf = ((t1 + t2) + (t3 + t4)).astype(np.float32)
         d17 = tf.astype(np.float64) + 4.0 * t5.astype(np.float64)
         d18 = ((t6.astype(np.float64) + t7.astype(np.float64))
@@ -390,12 +404,12 @@ def direction_map(out: Plane, src: Plane, roi: ROI, params: bytes):
         # The two large directional sums follow the assembly tree exactly:
         # fcvt from float32, then double adds/fmadds, one term fused in
         # float32 before widening, and a final fcvt + fnmsub.
-        a_m1 = V[Y - 3, X - 2]; a_0 = V[Y - 3, X - 1]; a_p1 = V[Y - 3, X]
-        a_p2 = V[Y - 3, X + 1]; a_p3 = V[Y - 3, X + 2]
-        b_m2 = V[Y - 2, X - 2]; b_0 = V[Y - 2, X]
-        b_p1 = V[Y - 2, X + 1]; b_p2 = V[Y - 2, X + 2]
-        c_m2 = V[Y - 1, X - 2]; c_m1 = V[Y - 1, X - 1]; c_0 = V[Y - 1, X]
-        c_p1 = V[Y - 1, X + 1]; c_p2 = V[Y - 1, X + 2]
+        a_m1 = at(V, -3, -2); a_0 = at(V, -3, -1); a_p1 = at(V, -3, 0)
+        a_p2 = at(V, -3, 1); a_p3 = at(V, -3, 2)
+        b_m2 = at(V, -2, -2); b_0 = at(V, -2, 0)
+        b_p1 = at(V, -2, 1); b_p2 = at(V, -2, 2)
+        c_m2 = at(V, -1, -2); c_m1 = at(V, -1, -1); c_0 = at(V, -1, 0)
+        c_p1 = at(V, -1, 1); c_p2 = at(V, -1, 2)
         t32 = fma(a_0, f32(2.0), a_m1)                 # fmadd s21, s21, #2, s22
         d20 = b_0.astype(np.float64) + a_p1.astype(np.float64)
         d20 = d20 + c_0.astype(np.float64)
@@ -412,11 +426,11 @@ def direction_map(out: Plane, src: Plane, roi: ROI, params: bytes):
         f45b = fma(sc, d20.astype(np.float32), -k1)
         f45b = np.fmax(f45b, k2)
 
-        p_m1 = H[Y - 1, X - 3]; p_0 = H[Y - 1, X - 2]; p_p1 = H[Y - 1, X - 1]
-        q_m1 = H[Y - 2, X - 3]; q_0 = H[Y - 2, X - 2]; q_p1 = H[Y - 2, X - 1]
-        s_m1 = H[Y, X - 3]; s_0 = H[Y, X - 2]; s_p1 = H[Y, X - 1]
-        t_m1 = H[Y + 1, X - 3]; t_0 = H[Y + 1, X - 2]; t_p1 = H[Y + 1, X - 1]
-        u_m1 = H[Y + 2, X - 3]; u_0 = H[Y + 2, X - 2]; u_p1 = H[Y + 2, X - 1]
+        p_m1 = at(H, -1, -3); p_0 = at(H, -1, -2); p_p1 = at(H, -1, -1)
+        q_m1 = at(H, -2, -3); q_0 = at(H, -2, -2); q_p1 = at(H, -2, -1)
+        s_m1 = at(H, 0, -3); s_0 = at(H, 0, -2); s_p1 = at(H, 0, -1)
+        t_m1 = at(H, 1, -3); t_0 = at(H, 1, -2); t_p1 = at(H, 1, -1)
+        u_m1 = at(H, 2, -3); u_0 = at(H, 2, -2); u_p1 = at(H, 2, -1)
         fq = fma(p_m1, f32(2.0), (q_0 + q_m1) + q_p1)  # fmadd s23, s26, #2, s23
         d21 = p_0.astype(np.float64) * 8.0 + fq.astype(np.float64)
         d21 = d21 + (t_0 * f32(8.0)).astype(np.float64)   # fmul s28, s28, #8
@@ -509,56 +523,58 @@ def chroma_candidates(h121: Plane, v121: Plane, havg: Plane, vavg: Plane, roi: R
     Rows come in pairs: row y in the first block, row y+1 in the second.
     Each block blends the two lines around the local average with a soft
     weight, and stores the four horizontal/vertical combinations.
+    The two row parities are processed as strided blocks.
     """
     x0, y0, x1, y1 = roi
     outA, outB, outC, outD = (Plane(h121.w, h121.h) for _ in range(4))
     H, V, HA, VA = h121.data, v121.data, havg.data, vavg.data
     oA, oB, oC, oD = outA.data, outB.data, outC.data, outD.data
 
-    X = np.arange(x0 + 2, x1 - 2, 2)
-    X1, X2 = X + 1, X + 2
-    if X.size == 0:
+    cs = slice(x0 + 2, x1 - 2, 2)
+    cs1 = slice(x0 + 3, x1 - 1, 2)
+    cs2 = slice(x0 + 4, x1, 2)
+    rs0 = slice(y0 + 2, y1 - 2, 2)
+    rs1 = slice(y0 + 3, y1 - 1, 2)
+    if len(np.arange(cs.start, cs.stop, 2)) == 0:
         return outA, outB, outC, outD
 
-    for y in range(y0 + 2, y1 - 2, 2):
-        y1_ = y + 1
-        # block 1, output row y, even x
-        hd = HA[y + 1, X] - H[y + 1, X]
-        w = _soft_weight_vec(H[y - 1, X], H[y + 1, X], HA[y, X])
-        oA[y, X] = H[y, X] - HA[y, X]
-        oB[y, X] = V[y, X] - VA[y, X]
-        oC[y, X] = _blend(hd, HA[y - 1, X], H[y - 1, X], hd, w)
-        vd = VA[y, X1] - V[y, X1]
-        w = _soft_weight_vec(V[y, X - 1], V[y, X1], VA[y, X])
-        oD[y, X] = _blend(vd, VA[y, X - 1], V[y, X - 1], vd, w)
-        # block 1, odd x
-        hd = H[y + 1, X1] - HA[y + 1, X1]
-        w = _soft_weight_vec(HA[y - 1, X1], HA[y + 1, X1], H[y, X1])
-        oA[y, X1] = HA[y, X1] - H[y, X1]
-        vd = V[y, X2] - VA[y, X2]
-        wv = _soft_weight_vec(VA[y, X], VA[y, X2], V[y, X1])
-        oB[y, X1] = _blend(vd, V[y, X], VA[y, X], vd, wv)
-        oC[y, X1] = _blend(hd, H[y - 1, X1], HA[y - 1, X1], hd, w)
-        oD[y, X1] = VA[y, X1] - V[y, X1]
+    # block 1, even x (row y, columns X)
+    hd = HA[_s(rs0, 1), cs] - H[_s(rs0, 1), cs]
+    w = _soft_weight_vec(H[_s(rs0, -1), cs], H[_s(rs0, 1), cs], HA[rs0, cs])
+    oA[rs0, cs] = H[rs0, cs] - HA[rs0, cs]
+    oB[rs0, cs] = V[rs0, cs] - VA[rs0, cs]
+    oC[rs0, cs] = _blend(hd, HA[_s(rs0, -1), cs], H[_s(rs0, -1), cs], hd, w)
+    vd = VA[rs0, cs1] - V[rs0, cs1]
+    w = _soft_weight_vec(V[rs0, _s(cs, -1)], V[rs0, cs1], VA[rs0, cs])
+    oD[rs0, cs] = _blend(vd, VA[rs0, _s(cs, -1)], V[rs0, _s(cs, -1)], vd, w)
+    # block 1, odd x (row y, columns X1)
+    hd = H[_s(rs0, 1), cs1] - HA[_s(rs0, 1), cs1]
+    w = _soft_weight_vec(HA[_s(rs0, -1), cs1], HA[_s(rs0, 1), cs1], H[rs0, cs1])
+    oA[rs0, cs1] = HA[rs0, cs1] - H[rs0, cs1]
+    vd = V[rs0, cs2] - VA[rs0, cs2]
+    wv = _soft_weight_vec(VA[rs0, cs], VA[rs0, cs2], V[rs0, cs1])
+    oB[rs0, cs1] = _blend(vd, V[rs0, cs], VA[rs0, cs], vd, wv)
+    oC[rs0, cs1] = _blend(hd, H[_s(rs0, -1), cs1], HA[_s(rs0, -1), cs1], hd, w)
+    oD[rs0, cs1] = VA[rs0, cs1] - V[rs0, cs1]
 
-        # block 2, output row y+1, even x
-        hd = H[y + 2, X] - HA[y + 2, X]
-        w = _soft_weight_vec(HA[y, X], HA[y + 2, X], H[y1_, X])
-        oA[y1_, X] = _blend(hd, H[y, X], HA[y, X], hd, w)
-        oB[y1_, X] = VA[y1_, X] - V[y1_, X]
-        oC[y1_, X] = HA[y1_, X] - H[y1_, X]
-        vd = V[y1_, X1] - VA[y1_, X1]
-        wv = _soft_weight_vec(VA[y1_, X - 1], VA[y1_, X1], V[y1_, X])
-        oD[y1_, X] = _blend(vd, V[y1_, X - 1], VA[y1_, X - 1], vd, wv)
-        # block 2, odd x
-        hd = HA[y + 2, X1] - H[y + 2, X1]
-        w = _soft_weight_vec(H[y, X1], H[y + 2, X1], HA[y1_, X1])
-        oA[y1_, X1] = _blend(hd, HA[y, X1], H[y, X1], hd, w)
-        vd = VA[y1_, X2] - V[y1_, X2]
-        wv = _soft_weight_vec(V[y1_, X], V[y1_, X2], VA[y1_, X1])
-        oB[y1_, X1] = _blend(vd, VA[y1_, X], V[y1_, X], vd, wv)
-        oC[y1_, X1] = H[y1_, X1] - HA[y1_, X1]
-        oD[y1_, X1] = V[y1_, X1] - VA[y1_, X1]
+    # block 2, even x (row y+1, columns X)
+    hd = H[_s(rs1, 1), cs] - HA[_s(rs1, 1), cs]
+    w = _soft_weight_vec(HA[_s(rs1, -1), cs], HA[_s(rs1, 1), cs], H[rs1, cs])
+    oA[rs1, cs] = _blend(hd, H[_s(rs1, -1), cs], HA[_s(rs1, -1), cs], hd, w)
+    oB[rs1, cs] = VA[rs1, cs] - V[rs1, cs]
+    oC[rs1, cs] = HA[rs1, cs] - H[rs1, cs]
+    vd = V[rs1, cs1] - VA[rs1, cs1]
+    wv = _soft_weight_vec(VA[rs1, _s(cs, -1)], VA[rs1, cs1], V[rs1, cs])
+    oD[rs1, cs] = _blend(vd, V[rs1, _s(cs, -1)], VA[rs1, _s(cs, -1)], vd, wv)
+    # block 2, odd x (row y+1, columns X1)
+    hd = HA[_s(rs1, 1), cs1] - H[_s(rs1, 1), cs1]
+    w = _soft_weight_vec(H[_s(rs1, -1), cs1], H[_s(rs1, 1), cs1], HA[rs1, cs1])
+    oA[rs1, cs1] = _blend(hd, HA[_s(rs1, -1), cs1], H[_s(rs1, -1), cs1], hd, w)
+    vd = VA[rs1, cs2] - V[rs1, cs2]
+    wv = _soft_weight_vec(V[rs1, cs], V[rs1, cs2], VA[rs1, cs1])
+    oB[rs1, cs1] = _blend(vd, VA[rs1, cs], V[rs1, cs], vd, wv)
+    oC[rs1, cs1] = H[rs1, cs1] - HA[rs1, cs1]
+    oD[rs1, cs1] = V[rs1, cs1] - VA[rs1, cs1]
     return outA, outB, outC, outD
 
 
@@ -699,23 +715,25 @@ def mix_121_average(outA: Plane, outB: Plane, src: Plane, roi: ROI):
 
     Row pair (y, y+1), y += 2, for y in [y0+2, y1-3).
     Each row gets: averages at even x, step-2 1-2-1 at odd x.
+    The two row parities are processed as strided blocks.
     """
     x0, y0, x1, y1 = roi
     s = src.data
     A, B = outA.data, outB.data
-    X = np.arange(x0 + 2, x1 - 2, 2)
-    X1, X2 = X + 1, X + 2
-    if X.size == 0:
+    cs = slice(x0 + 2, x1 - 2, 2)
+    cs1 = slice(x0 + 3, x1 - 1, 2)
+    rs0 = slice(y0 + 2, y1 - 3, 2)
+    rs1 = slice(y0 + 3, y1 - 2, 2)
+    if len(np.arange(cs.start, cs.stop, 2)) == 0:
         return
-    for y in range(y0 + 2, y1 - 3, 2):
-        B[y, X] = _avg(s[y - 1, X], s[y + 1, X])
-        A[y, X] = _avg(s[y, X - 1], s[y, X1])
-        B[y, X1] = _mix121(s[y + 2, X1], s[y - 2, X1], s[y, X1])
-        A[y, X1] = _mix121(s[y, X + 3], s[y, X - 1], s[y, X1])
-        B[y + 1, X] = _mix121(s[y + 3, X], s[y - 1, X], s[y + 1, X])
-        A[y + 1, X] = _mix121(s[y + 1, X2], s[y + 1, X - 2], s[y + 1, X])
-        B[y + 1, X1] = _avg(s[y, X1], s[y + 2, X1])
-        A[y + 1, X1] = _avg(s[y + 1, X], s[y + 1, X2])
+    B[rs0, cs] = _avg(s[_s(rs0, -1), cs], s[_s(rs0, 1), cs])
+    A[rs0, cs] = _avg(s[rs0, _s(cs, -1)], s[rs0, _s(cs, 1)])
+    B[rs0, cs1] = _mix121(s[_s(rs0, 2), cs1], s[_s(rs0, -2), cs1], s[rs0, cs1])
+    A[rs0, cs1] = _mix121(s[rs0, _s(cs, 3)], s[rs0, _s(cs, -1)], s[rs0, cs1])
+    B[rs1, cs] = _mix121(s[_s(rs1, 2), cs], s[_s(rs1, -2), cs], s[rs1, cs])
+    A[rs1, cs] = _mix121(s[rs1, _s(cs, 2)], s[rs1, _s(cs, -2)], s[rs1, cs])
+    B[rs1, cs1] = _avg(s[_s(rs1, -1), cs1], s[_s(rs1, 1), cs1])
+    A[rs1, cs1] = _avg(s[rs1, cs], s[rs1, _s(cs, 2)])
 
 
 def h_second_diff(out_a: Plane, out_abs: Plane, src: Plane, roi: ROI):

@@ -241,43 +241,75 @@ TAPS = ((0, -3), (-1, -2), (0, -2), (1, -2), (-2, -1), (-1, -1), (0, -1), (1, -1
         (-2, 1), (-1, 1), (0, 1), (1, 1), (2, 1), (-1, 2), (0, 2), (1, 2), (0, 3))
 
 
-def spica(Y, region, T, S, dev208=0, dev2c4=50):
-    """Y: uint16 plane; region (x0, y0, x1, y1): pixels [x0+3, x1-3) x [y0+3, y1-3) are processed."""
+def spica(Y, region, T, S, dev208=0, dev2c4=50, strip=512):
+    """Y: uint16 plane; region (x0, y0, x1, y1): pixels [x0+3, x1-3) x [y0+3, y1-3) are processed.
+
+    Processed in horizontal strips; the 3-px support is covered by the strip halo, so
+    the result is the same as processing the whole plane.  The pattern tables give
+    dx, dy = +/-1 only, so the 25 taps are read through plain slices of a float32
+    copy (four quadrant variants) instead of per-pixel fancy indexing.
+    """
     x0, y0, x1, y1 = region
-    Yi = Y.astype(np.int64)
-    ys, xs = np.mgrid[y0 + 3:y1 - 3, x0 + 3:x1 - 3]
-    v = [Yi[ys + dy, xs + dx] for dx, dy in CROSS]
-    mn = v[0].copy(); mx = v[0].copy()
-    for a in v[1:]:
-        mn = np.minimum(mn, a); mx = np.maximum(mx, a)
-    rng = mx - mn
-    half = rng // 2
-    bits = sum(((half <= (v[i] - mn)).astype(np.int64) << i) for i in range(9))
-    low = bits & 0xff
-    idx = np.where(bits & 0x100, (~low) & 0xff, low)
-    idx = np.where(rng.astype(np.uint64) < np.uint64(int(S["thr"])), 0, idx)
-    pat = T["patterns"][idx]
-    ci, dxs, dys = pat[..., 0], pat[..., 1], pat[..., 2]
-    co = T["coefs"][ci]
-    acc = None
-    for t, (a, b) in enumerate(TAPS):
-        val = Yi[ys + b * dys, xs + a * dxs].astype(f32)
-        acc = (co[..., 1] * val).astype(f32) if acc is None else fma32(co[..., 1 + t], val, acc)
-    Yc = Yi[ys, xs]
-    if S["full"] == 0:
-        t_ = acc.astype(np.int64) >> 9
-    else:
-        d = ((acc - (Yc << 9).astype(f32)).astype(f32) * S["s"]).astype(f32)
-        mid = ((mn + mx) // 2).astype(f32)          # (min+max) >= 0: truncating halving
-        g = spica_gain((d * f32(0.0078125)).astype(f32), rng.astype(f32), mid, S)
-        m = (f32(0.001953125) * (g * f32(0.001953125)).astype(f32)).astype(f32)
-        t_ = (d * m).astype(f32).astype(np.int64) + Yc
-    t_ = np.minimum(t_, 0x3fff)
-    t_ = np.maximum(t_, 0)
-    k = f32(f32(f32(S["k2"] * f32(0.0002)) * f32(dev208 + 100)) * f32(100 - dev2c4))
-    y = Yc.astype(f32)
-    o = fma32(k, (t_.astype(np.int16).astype(f32) - y).astype(f32), y)
-    o = np.maximum(np.minimum(o, f32(32767.0)), f32(0))
     out = Y.copy()
-    out[y0 + 3:y1 - 3, x0 + 3:x1 - 3] = o.astype(np.int64).astype(np.uint16)
+    Wout = x1 - x0 - 6
+    Hout = y1 - y0 - 6
+    if Wout <= 0 or Hout <= 0:
+        return out
+    patterns = T["patterns"]
+    coefs = T["coefs"]
+    thr = np.uint64(int(S["thr"]))
+    full = S["full"]
+    so = S["s"]
+    k = f32(f32(f32(S["k2"] * f32(0.0002)) * f32(dev208 + 100)) * f32(100 - dev2c4))
+    step = max(1, int(strip))
+    for r0 in range(0, Hout, step):
+        r1 = min(r0 + step, Hout)
+        hh, ww = r1 - r0, Wout
+        A = Y[y0 + r0:y0 + r0 + hh + 6, x0:x1]
+        Ai = A.astype(np.int32)
+        Af = A.astype(np.float32)
+        # 9-pixel cross census, local output origin (3, 3)
+        v = [Ai[3 + dy:3 + dy + hh, 3 + dx:3 + dx + ww] for dx, dy in CROSS]
+        mn = v[0].copy(); mx = v[0].copy()
+        for a in v[1:]:
+            mn = np.minimum(mn, a); mx = np.maximum(mx, a)
+        rng = mx - mn
+        half = rng // 2
+        bits = sum(((half <= (v[i] - mn)).astype(np.int32) << i) for i in range(9))
+        low = bits & 0xff
+        idx = np.where(bits & 0x100, (~low) & 0xff, low)
+        idx = np.where(rng.astype(np.uint64) < thr, 0, idx)
+        ci = patterns[idx, 0]
+        dxs = patterns[idx, 1]
+        dys = patterns[idx, 2]
+        q_pp = (dxs > 0) & (dys > 0)
+        q_pm = (dxs > 0) & (dys < 0)
+        q_mp = (dxs < 0) & (dys > 0)
+        # 25-tap diamond; each tap sits on one of the four +/-1 quadrants
+        acc = None
+        for t, (a, b) in enumerate(TAPS):
+            rp, rn = 3 + b, 3 - b
+            cp, cn = 3 + a, 3 - a
+            spp = Af[rp:rp + hh, cp:cp + ww]
+            spm = Af[rp:rp + hh, cn:cn + ww]
+            smp = Af[rn:rn + hh, cp:cp + ww]
+            smm = Af[rn:rn + hh, cn:cn + ww]
+            val = np.where(q_pp, spp, np.where(q_pm, smp, np.where(q_mp, spm, smm)))
+            ct = coefs[ci, 1 + t]
+            acc = (ct * val).astype(f32) if acc is None else fma32(ct, val, acc)
+        Yc = Ai[3:3 + hh, 3:3 + ww]
+        if full == 0:
+            t_ = acc.astype(np.int64) >> 9
+        else:
+            d = ((acc - (Yc << 9).astype(f32)).astype(f32) * so).astype(f32)
+            mid = ((mn + mx) // 2).astype(f32)          # (min+max) >= 0: truncating halving
+            g = spica_gain((d * f32(0.0078125)).astype(f32), rng.astype(f32), mid, S)
+            m = (f32(0.001953125) * (g * f32(0.001953125)).astype(f32)).astype(f32)
+            t_ = (d * m).astype(f32).astype(np.int64) + Yc
+        t_ = np.minimum(t_, 0x3fff)
+        t_ = np.maximum(t_, 0)
+        y = Yc.astype(f32)
+        o = fma32(k, (t_.astype(np.int16).astype(f32) - y).astype(f32), y)
+        o = np.maximum(np.minimum(o, f32(32767.0)), f32(0))
+        out[y0 + 3 + r0:y0 + 3 + r1, x0 + 3:x1 - 3] = o.astype(np.int64).astype(np.uint16)
     return out

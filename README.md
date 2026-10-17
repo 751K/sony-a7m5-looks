@@ -159,7 +159,7 @@ The full decoder runs every stage from RawNR to the Creative Look:
 python3 sonylook/sony_decode.py /path/to/A7M5.ARW --out out.tif
 ```
 
-It writes the 7008×4672 decoder rectangle as 16-bit TIFF or 8-bit PNG. The look and the optional stages follow Edit's saved develop settings when the ARW has them, and otherwise the values Edit starts from for an unsaved file (as-shot look, NR and DRO from the camera, lens corrections on, the look's default clarity); `--no-nr`, `--no-dro`, `--no-marble`, `--no-detail`, `--no-lens` and `--no-sscs` turn them off.
+It writes the 7008×4672 decoder rectangle as a 16-bit TIFF, or an 8-bit JPEG / PNG, in sRGB or Adobe RGB (`--color-space srgb|adobe`, `--bits 8|16`), with the ICC profile bundled with your Edit installation. The look and the optional stages follow Edit's saved develop settings when the ARW has them, and otherwise the values Edit starts from for an unsaved file (as-shot look, NR and DRO from the camera, lens corrections on, the look's default clarity); `--no-nr`, `--no-dro`, `--no-marble`, `--no-detail`, `--no-lens` and `--no-sscs` turn them off.
 
 ### Recalibration (for new software versions)
 

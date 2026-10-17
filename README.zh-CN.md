@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-天下苦创意风格久矣，CameraRaw 内迟迟没有上线A7M5的创意风格稳健
+天下苦创意风格久矣，CameraRaw 内迟迟没有上线A7M5的创意风格文件
 
 本仓库通过逆向Sony Image Edit，把 Sony α7 V（ILCE-7M5）的 12 种 Creative Look移植成 Capture One 和 Camera Raw / Lightroom 的配置，并通过对比检验，色度上基本没有差异。
 
@@ -143,7 +143,7 @@ python3 sonylook/sony_render.py /path/to/A7M5.ARW Standard FL2 --scale 4
 python3 sonylook/sony_decode.py /path/to/A7M5.ARW --out out.tif
 ```
 
-输出 7008×4672 的解码器矩形，可选 16 位 TIFF 或 8 位 PNG。外观和可选阶段按 ARW 里 Edit 保存的显影设置决定；没保存过的文件，按 Edit 首次打开时的初始值（拍摄时的外观、相机的降噪和 DRO、镜头校正开、该外观的默认清晰度）；`--no-nr`、`--no-dro`、`--no-marble`、`--no-detail`、`--no-lens`、`--no-sscs` 可分别关闭。
+输出 7008×4672 的解码器矩形，可选 16 位 TIFF 或 8 位 JPEG / PNG，色彩空间 sRGB 或 Adobe RGB（`--color-space srgb|adobe`、`--bits 8|16`），并嵌入你本机 Edit 自带的 ICC 配置。外观和可选阶段按 ARW 里 Edit 保存的显影设置决定；没保存过的文件，按 Edit 首次打开时的初始值（拍摄时的外观、相机的降噪和 DRO、镜头校正开、该外观的默认清晰度）；`--no-nr`、`--no-dro`、`--no-marble`、`--no-detail`、`--no-lens`、`--no-sscs` 可分别关闭。
 
 ### 重新标定（换软件版本时）
 

@@ -34,7 +34,8 @@
 | Marble（清晰度 / 色度降噪） | 逐位移植 | 否 | §10.16 |
 | Effect（BW / SE） | 逐位移植 | 是 | §10.14 |
 | ToneCurve、ShadeCorrection | 本图参数下不运行（曲线为恒等，暗角补偿未启用），未移植 | 默认不用 | §10.9 |
-| 整图串联 `decode(arw)` | 已完成（7008×4672 uint16）；ST 与 Edit 导出全图 8 位 MAE 0.130 | — | §10.25 |
+| 整图串联 `decode(arw)` | 已完成（7008×4672 uint16）；ST 与 Edit 导出全图 8 位 MAE 0.130，整图约 41 s | — | §10.25 |
+| 输出：sRGB / AdobeRGB，8/16 位 TIFF、JPEG | 已完成；AdobeRGB 全图 8 位 MAE 0.133 | — | §10.26 |
 
 **外观默认参数**：12 种外观的对比度、高光、阴影、饱和度均为 0。褪色 FL2/FL3 = 1、IN = 3、SH = 6，其余为 0（相机确认，§10.18）。锐度、锐度范围、清晰度只影响空间处理。Edit 的默认参数表缺 FL2/FL3 两行（§10.16、§10.17）。
 
@@ -147,7 +148,7 @@ python3 analysis/reverse/pixel_pipeline/verify_pixel_path.py
 1. ~~0x7841–0x7846~~：已解决，见第 8 节。
 2. ~~**0x780c / 0x780d / 0x780e**：用途未知~~：已解决。它们是 YGamma 的拐点、斜率和按褪色级别插值的增益，见第 9 节和 §10.18。
 3. ~~**LM16 之前的相机→sRGB 线性转换**没有分析~~：已解决。Sony 不做这一步，0x780f 直接作用在白平衡后的相机原生 RGB 上，见 §10.8、§10.10。SSCS 仍未移植。原文：（Demosaic/SSCS）没有分析。移植时可以用 ACR/C1 自身的线性 sRGB 渲染作为输入，但两家的相机色彩差异会成为误差来源。
-4. **mode/param8 的运行时取值**仍是推断。Edit 是去符号且启用 hardened runtime 的程序，REA 的 `observe_native_calls` 只能按符号名下断点，无法直接观测。→ 后来按 output_mode = 0、param8 = 0 渲染，与 Edit 的 sRGB 导出逐像素对照，误差为 0.2–0.3（§10.13）。如果取值错了，就会多出一个 sRGB↔AdobeRGB 矩阵，误差会大得多，所以 sRGB 输出下这个取值已间接证实。
+4. **mode/param8 的运行时取值**仍是推断。Edit 是去符号且启用 hardened runtime 的程序，REA 的 `observe_native_calls` 只能按符号名下断点，无法直接观测。→ 后来按 output_mode = 0、param8 = 0 渲染，与 Edit 的 sRGB 导出逐像素对照，误差为 0.2–0.3（§10.13）。如果取值错了，就会多出一个 sRGB↔AdobeRGB 矩阵，误差会大得多，所以 sRGB 输出下这个取值已间接证实。→ AdobeRGB（output_mode 1、param8 0）也已与 Edit 的 AdobeRGB 导出对照（§10.26）。
 5. ~~对照 Sony 官方显影成片：`render_reference/` 目前仍为空~~：已有 ST/FL2/FL3 的 Edit 导出，见第 10 节。
 
 ## 7. 证据
@@ -971,15 +972,38 @@ RAW -> [RawNR] -> ITP(1024 分块) -> [DRO/Vatr] -> GeoCorr -> SSCS
   **32 px 真实 RAW 边缘**（`pad=32`）的图像上运行，最后裁回解码矩形；这样边界看到的是真实
   邻域，而不是外推。DRO 的网格仍按解码矩形构建。
 - DRO 按 256 行、GeoCorr 按 512 行分条处理。Marble 只写内缩 16 px 的区域；其余像素保留
-  Marble 之前的 YCC2RGB 结果——用同一 look 的“无 Marble 渲染 + Effect”与有 Marble 渲染
-  按有效区域合成（不是边缘复制）。
+  Marble 之前的 YCC2RGB 结果（不是边缘复制）。现在只渲染一遍：Marble 直接在内存中的
+  YCC2RGB 结果上运行，边框取同一数组的值（最早的版本把整条外观链渲染两遍再合成）。
+- 外观链按 `strip=512` 行分条：每条在 [y−8, y+8) 上跑逐像素部分，Sharpness 需要 3 行上下文、
+  任务区再内缩 2 行，Spica 的输入是精确的 [y−3, y+3) 子条；SSCS 也移到分条里做，避免整图
+  int64 临时数组。Marble 按行分块，上下各留 12 个块（B = 4 或 8 px）的上下文——这个余量是
+  在全分辨率文件上实测的，有效行与整图处理逐位一致。`strip=0` 退回整图处理。
+- `fma32` 只对 float64 和恰好落在 float32 中点的少数像素计算 TwoSum 余项，结果不变。
 - 验证：保存过的 DSC03591（Edit 会话：NR/DRO/CA 关、清晰度 10）+ ST look，与 Edit 导出的
   16-bit TIFF 对照，6 个 128² 裁块的 8 位 MAE **0.076**（0.012–0.221），全图 **0.130**，
   通道偏差约 0.13。边界（16 px 带）分别是上 0.25、下 0.21、左 0.19、右 0.15、角 0.28，
   与内部同量级。对照：用相机快照（NR/DRO/CA 开）解码时裁块 MAE 0.425，仅关闭 CA 后
   0.380——这既确认导出用的是第二个快照，也验证了整条接线。
-- 耗时（Apple Silicon，单线程）：全流程约 4–5 分钟；Marble 需要渲染两遍（有/无），
-  pad=32 时 ITP 23 s、GeoCorr 10 s、SSCS 3 s、渲染约 216 s；峰值 RSS 约 6 GB。`pad=0`
-  更快但边界会退化。
+- 耗时（Apple Silicon）：加速前全流程约 4–5 分钟（渲染两遍，约 216 s；峰值 RSS 约 6 GB）。
+  加速后 DSC03591 全流程 **41 s**：ITP 6 s、GeoCorr 8 s、渲染 28 s（SSCS 1.3、外观 6.8、
+  Sharpness 3.3、Spica 6.7、Marble 5.0 s）。结果与加速前逐位一致。`pad=0` 更快但边界会退化。
 - 限制：ToneCurve、ShadeCorrection、3DLut 构建链未移植（当前文件不运行）；非 RGGB 会报错；
   非全画幅文件依赖正确的解码器矩形（已自动读取）。
+
+### 10.26 输出色彩空间与文件格式（2026-10-17）
+
+- **色彩空间**：`decode(arw, output="srgb" | "adobe")`。AdobeRGB 走 LinearMatrix16 的
+  output_mode 1、param8 0：工作空间仍是 sRGB 原色（外观表按它编写），只多乘 Sony 的
+  sRGB → AdobeRGB 线性矩阵；同一个 render+0x44 还传给 Marble（mode 1）和 BW/SE 的
+  Effect（mode 1）。MainGamma 不变。
+- **对照**：保存过的 DSC03591 + ST，与 Edit 的 AdobeRGB 16 位导出全图对照，8 位 MAE **0.133**，
+  与 sRGB 的 0.130 同量级；14 位单位 MAE 8.7、p99 125。
+- **位深**：Edit 的 16 位 TIFF 存的正好是 14 位值 << 2（全部为 4 的倍数，最大 65532）；8 位
+  导出是 16 位值 >> 8（即 14 位 >> 6，直接截断，不四舍五入）。AdobeRGB 与 sRGB 两组导出上，
+  除了几十个像素外全部吻合；那几个像素在 Edit 两次导出之间本身就会变。
+- **ICC 与 EXIF**：Edit 只在 AdobeRGB 时嵌入配置文件（tag 34675，类型 7，与安装包里的
+  `Sony_AdobeRGB_1998.icc` 逐字节相同），EXIF ColorSpace = 0xFFFF；sRGB 导出不嵌 ICC，
+  ColorSpace = 1。`sonylook/sony_export.py` 两种都嵌入（sRGB 用 `Sony_sRGB.icc`），
+  配置文件运行时从本机 Edit 安装目录读取（`SONY_EDIT_RESOURCES`）。
+- 命令行：`--color-space srgb|adobe`、`--bits 8|16`、`--quality`；`.tif` 默认 16 位，
+  `.jpg` / `.png` 为 8 位。

@@ -39,25 +39,37 @@ def load_static_tables():
 def fma32(a, b, c):
     """Single-rounding float32 fused multiply-add, vectorised.
 
-    a*b of two float32 is exact in float64. The float64 sum may round once; if
-    it lands exactly on a float32 midpoint, the TwoSum residual picks the side.
+    a*b of two float32 is exact in float64. The float64 sum may round to a
+    float32 midpoint; only those (rare) lanes need the TwoSum residual that
+    picks the side, so the residual is computed for the candidates alone.
     """
-    a, b, c = (np.asarray(x, np.float64) for x in (a, b, c))
-    p = a * b
-    s = p + c
-    bb = s - p
-    err = (p - (s - bb)) + (c - bb)
-    s, err = np.broadcast_arrays(s, err)
+    p = np.multiply(a, b, dtype=np.float64)
+    s = np.add(p, c, dtype=np.float64)
     r = s.astype(np.float32)
-    bits = np.ascontiguousarray(s).view(np.uint64)
-    mid = ((bits & np.uint64((1 << 29) - 1)) == np.uint64(1 << 28)) & (err != 0) & np.isfinite(s)
-    if np.any(mid):
-        r = np.array(r, copy=True)
-        sm = s[mid]
-        lo = sm.astype(np.float32)
-        lo = np.where(lo.astype(np.float64) > sm, np.nextafter(lo, np.float32(-np.inf)), lo)
-        hi = np.nextafter(lo, np.float32(np.inf))
-        r[mid] = np.where(err[mid] > 0, hi, lo)
+    bits = s.view(np.uint64)
+    mid = (bits & np.uint64((1 << 29) - 1)) == np.uint64(1 << 28)
+    if mid.any():
+        exp = bits & np.uint64(0x7ff0000000000000)
+        mid &= exp != np.uint64(0x7ff0000000000000)       # finite only
+        idx = np.flatnonzero(mid.reshape(-1))
+        if idx.size:
+            shape = s.shape if s.ndim else (1,)
+            pp = p.reshape(-1)[idx]
+            ss = s.reshape(-1)[idx]
+            ii = np.unravel_index(idx, shape)
+            cc = np.broadcast_to(np.asarray(c, np.float64), shape)[ii]
+            bb = ss - pp
+            err = (pp - (ss - bb)) + (cc - bb)
+            ok = err != 0
+            if ok.any():
+                rr = np.array(r, copy=True).reshape(-1)
+                sm = ss[ok]
+                lo = sm.astype(np.float32)
+                lo = np.where(lo.astype(np.float64) > sm,
+                              np.nextafter(lo, np.float32(-np.inf)), lo)
+                hi = np.nextafter(lo, np.float32(np.inf))
+                rr[idx[ok]] = np.where(err[ok] > 0, hi, lo)
+                r = rr.reshape(s.shape)
     return r
 
 

@@ -11,7 +11,9 @@ Every stage is the bit-exact port in this directory.  Optional stages follow the
 develop settings when Edit saved the ARW (sonylook/develop_settings.py); for a
 camera-original ARW they default off (except SSCS, which the builder always
 inserts).  The output is the decoder rectangle (DefaultCropOrigin/Size), e.g.
-7008x4672 for the A7M5, as uint16 0..16383.
+7008x4672 for the A7M5, as uint16 0..16383 in the requested output color space
+("srgb" or "adobe", LinearMatrix16 output_mode 0/1).  sony_export.write_image()
+turns that into Edit's 8/16-bit TIFF or JPEG with the bundled ICC profile.
 
 Not ported (and not running for the current files): ToneCurve, ShadeCorrection,
 3DLut construction, the 4.1 picker helpers.
@@ -33,6 +35,7 @@ import decoder_params as DP     # noqa: E402
 import develop_settings as DS   # noqa: E402
 import sony_detail as SDT       # noqa: E402
 import sony_dro as DRO          # noqa: E402
+import sony_export as EXP       # noqa: E402
 import sony_frontend as F       # noqa: E402
 import sony_itp as ITP          # noqa: E402
 import sony_lens as LN          # noqa: E402
@@ -57,10 +60,14 @@ def _sr2_tags(arw):
             for k, v in sr2.sr2_subifd(str(arw)).items()}
 
 
-def decode(arw, look=None, *, raw=None, nr=None, dro=None, marble=None, detail=True,
-           lens=True, sscs=True, pad=32, verbose=False):
+def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble=None,
+           detail=True, lens=True, sscs=True, pad=32, strip=512, verbose=False):
     """Decode an ARW to the exported image (H, W, 3) uint16 0..16383.
 
+    output: "srgb" or "adobe" (AdobeRGB).  The look's LinearMatrix16 table is built
+            with output_mode 0/1, param8 0: the working space stays sRGB (the look
+            tables are authored there) and mode 1 applies Sony's sRGB -> AdobeRGB
+            linear matrix.  BW/Sepia also pass it to the Effect stage (mode 0/1).
     look:   look name from arw_looks.look_ifds ("Standard", "FL2", ...); None follows the
             settings (0x8000: 1 = the look the camera shot with, SR2 0x7770; else a look id).
     raw:    optional full visible CFA image (uint16); read with rawpy if None.
@@ -71,10 +78,13 @@ def decode(arw, look=None, *, raw=None, nr=None, dro=None, marble=None, detail=T
     pad:    raw margin in px around the decoder rect for the spatial stages
             (default 32).  Marble writes only its 16-px-inset region; the rest of
             the image keeps the pre-Marble (YCC2RGB) render.
+    strip:  row-band height for the look chain, Sharpness/Spica and Marble
+            (0 = whole array, higher peak memory).
     """
     t0 = time.perf_counter()
     timings = {}
     arw = Path(arw)
+    output = EXP.normalize_space(output)
 
     main = AL.main_tags(str(arw))
     tags = _sr2_tags(arw)
@@ -170,12 +180,12 @@ def decode(arw, look=None, *, raw=None, nr=None, dro=None, marble=None, detail=T
     timings["geocorr"] = time.perf_counter() - t
 
     # --- SSCS (the builder always inserts it, right after GeoCorr) ------------
-    t = time.perf_counter()
-    if sscs:
-        planes = list(SC.sscs_int(*planes, SC.params_from_tags(tags)))
-    timings["sscs"] = time.perf_counter() - t
+    # Run it inside Look.render, which applies it band by band; doing it here on the
+    # whole full-resolution image costs several GB of int64 temporaries.
+    sscs_params = SC.params_from_tags(tags) if sscs else None
 
     lin = np.stack(planes, -1).astype(np.uint16)
+    del planes
 
     # --- look chain, with Sharpness/Spica and Marble --------------------------
     t = time.perf_counter()
@@ -208,23 +218,22 @@ def decode(arw, look=None, *, raw=None, nr=None, dro=None, marble=None, detail=T
         fade = int(st[DS.FADE]) // 10          # the slider is whole steps
     else:
         fade = 0 if look in ("FL2", "FL3") else None
-    lk = R.Look(look, looks, fade=fade)
+    lk = R.Look(look, looks, fade=fade, output_mode=1 if output == "adobe" else 0)
+    rt = {}
     if marble:
-        # Marble writes only the region inset by 16 px; everywhere else the image
-        # keeps its YCC2RGB value (the pre-Marble render, Effect included).  Render
-        # both and composite, instead of inventing an edge extension.
-        pre = np.asarray(lk.render(lin, detail=detail_cfg, marble=None), np.uint16)
-        img = np.asarray(lk.render(lin, detail=detail_cfg, marble=marble_cfg), np.uint16)
-        m = 16
-        H, W = img.shape[:2]
-        valid = np.zeros((H, W), bool)
-        valid[m:H - m, m:W - m] = True
-        img = np.where(valid[..., None], img, pre)
+        # One render pass: Marble runs on the YCC2RGB result, and the 16-px border keeps the
+        # pre-Marble value of that same array (the old code rendered the whole look chain twice).
+        img = np.asarray(lk.render(lin, detail=detail_cfg, marble=marble_cfg,
+                                   sscs=sscs_params, marble_inset=16, timings=rt,
+                                   strip=strip), np.uint16)
     else:
-        img = np.asarray(lk.render(lin, detail=detail_cfg, marble=None), np.uint16)
+        img = np.asarray(lk.render(lin, detail=detail_cfg, marble=None,
+                                   sscs=sscs_params, timings=rt, strip=strip), np.uint16)
     # crop back to the decoder rectangle
     ty, tx = y0 - ey0, x0 - ex0
     img = img[ty:ty + (y1 - y0), tx:tx + (x1 - x0)]
+    for k, v in rt.items():
+        timings[f"render.{k}"] = v
     timings["render"] = time.perf_counter() - t
     timings["total"] = time.perf_counter() - t0
     if verbose:
@@ -237,7 +246,13 @@ def main():
     ap = argparse.ArgumentParser(description="Decode an ARW through the full Sony pipeline")
     ap.add_argument("arw")
     ap.add_argument("--look", default=None, help="default: the look in the settings / the one shot with")
-    ap.add_argument("--out", default=None, help="output .tif (16-bit) or .png (8-bit)")
+    ap.add_argument("--out", default=None,
+                    help="output .tif/.tiff (16-bit), .jpg (8-bit) or .png (8-bit)")
+    ap.add_argument("--color-space", default="srgb", choices=["srgb", "adobe"],
+                    help="output color space (default srgb)")
+    ap.add_argument("--bits", type=int, default=None, choices=[8, 16],
+                    help="bit depth (default: 16 for TIFF, 8 otherwise)")
+    ap.add_argument("--quality", type=int, default=95, help="JPEG quality 1..100")
     ap.add_argument("--no-nr", action="store_true")
     ap.add_argument("--no-dro", action="store_true")
     ap.add_argument("--no-marble", action="store_true")
@@ -245,19 +260,16 @@ def main():
     ap.add_argument("--no-lens", action="store_true")
     ap.add_argument("--no-sscs", action="store_true")
     ap.add_argument("--pad", type=int, default=32, help="expand the decoder rect by N px of raw margin")
+    ap.add_argument("--strip", type=int, default=512, help="row-band height for the render (0 = whole image)")
     a = ap.parse_args()
-    img = decode(a.arw, a.look, nr=False if a.no_nr else None, dro=False if a.no_dro else None,
+    img = decode(a.arw, a.look, output=a.color_space,
+                 nr=False if a.no_nr else None, dro=False if a.no_dro else None,
                  marble=False if a.no_marble else None, detail=not a.no_detail,
-                 lens=not a.no_lens, sscs=not a.no_sscs, pad=a.pad, verbose=True)
+                 lens=not a.no_lens, sscs=not a.no_sscs, pad=a.pad, strip=a.strip, verbose=True)
     print(img.shape, img.dtype, int(img.min()), int(img.max()))
     if a.out:
-        out = Path(a.out)
-        if out.suffix.lower() in (".tif", ".tiff"):
-            import tifffile
-            tifffile.imwrite(out, img, photometric="rgb")
-        else:
-            from PIL import Image
-            Image.fromarray((img >> 6).clip(0, 255).astype(np.uint8)).save(out)
+        out = EXP.write_image(img, a.out, color_space=a.color_space,
+                              bits=a.bits, quality=a.quality)
         print("->", out)
 
 
