@@ -41,6 +41,16 @@ def main_tags(path):
     return {f"0x{k:04x}": _fmt(*sub[k][:2]) for k in sorted(sub)}
 
 
+def sony_model_id(path):
+    """MakerNote 0xb001 SonyModelID (A7M5: 407); Edit keeps it at decoder+0xc / look+0x2c."""
+    data = open(path, "rb").read()
+    ifd0 = sr2.ifd(data, struct.unpack_from("<I", data, 4)[0])
+    exif = sr2.ifd(data, struct.unpack("<I", ifd0[0x8769][2])[0])
+    mn = struct.unpack("<I", exif[0x927c][2])[0]
+    note = sr2.ifd(data, mn + 12 if data[mn:mn + 4] == b"SONY" else mn)
+    return note[0xb001][1][0]
+
+
 def look_ifds(path):
     """{ColorMode name: {'0x7842': ..., ..., 'ColorMode': name}} for every look stored in the file."""
     blk, off, sub = sr2_block(str(path))

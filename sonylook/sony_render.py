@@ -4,7 +4,7 @@
     RAW --(raw-0x7310 black)*0x7311*WB_RGGBLevels*(0x7809/256)/2^19 --ITP--> --GeoCorr(0x7984/0x7980)--> (front_end_sony)--> camera RGB (int16 scale)
         --LinearMatrix16(0x780f, works directly on WB'd camera RGB)--> --MainGamma(0x7805/0x7806)-->
         --RGB2YCC(0x7842+0x7844, 0x7801)--> --AreaComp--> --ChromaSuppress(0x787e-0x7881)-->
-        --YGamma(0x780c/d knee, 0x780e gain)--> --YCC2RGB--> 14-bit encoded RGB
+        --YGamma(0x780c/d knee, 0x780e gain)--> --YCC2RGB--> [Effect: BW / Sepia only] --> 14-bit encoded RGB
 
 All look parameters come from the ARW itself (arw_looks.py); constant tables from the user's own
 Imaging Edge Edit install (edit_binary.py).
@@ -28,9 +28,10 @@ import sony_ycc as SY           # noqa: E402
 import sony_ycc_stages as SS    # noqa: E402
 import build_color_table as BT  # noqa: E402
 import decode_780f as D         # noqa: E402
+import sony_effect as EF        # noqa: E402
 
 CROP = dict(left=12, top=8, width=7008, height=4672)     # Sony default crop (ExifTool)
-MAIN_TAGS = ("0x7841", "0x7847", "0x7848", "0x780b", "0x787e", "0x787f", "0x7880", "0x7881")
+MAIN_TAGS = ("0x7841", "0x7847", "0x7848", "0x780b", "0x787e", "0x787f", "0x7880", "0x7881", "0x74c5")
 
 
 LOOK_IDS = {"Standard": 2, "ST": 2, "Vivid": 4, "Neutral": 7, "Portrait": 8, "BW": 0x10, "Sepia": 0x11,
@@ -47,6 +48,7 @@ def load_looks(arw):
     out["ST"] = out["Standard"]
     main = AL.main_tags(arw)
     out["_main"] = {t: main[t] for t in MAIN_TAGS}
+    out["_main"]["SonyModelID"] = AL.sony_model_id(arw)
     return out
 
 
@@ -109,6 +111,9 @@ class Look:
         self.cs = self.chroma_params(0)
         # AreaComp: inserted for ARW format code 0x3600 (0xb000 = ARW 6.0); 0x7770 look id
         self.area_comp = SS.area_comp_params(0x3600, True, LOOK_IDS.get(name, 0))
+        # Effect (BW / Sepia, sony_effect.py): Sepia tint from 0x74c5 unless SonyModelID is an old body
+        self.look_id = LOOK_IDS.get(name, 0)
+        self.tint = EF.tint(int(MAIN["SonyModelID"]), ints(MAIN["0x74c5"])) if self.look_id == EF.LOOK_SEPIA else None
 
     def chroma_params(self, render_exposure):
         r18ee = int(np.exp2(render_exposure * 0.0033333333333333335) * 64.0)
@@ -141,6 +146,8 @@ class Look:
             import sony_detail as SDT
             y = SDT.spica(np.asarray(y, np.uint16), (0, 0, w, h), *detail["spica"])
         r, g, b = SY.ycc2rgb(y, cr, cb)
+        if self.look_id & ~1 == 0x10:      # render+0x44 = 0: sRGB output
+            r, g, b = EF.effect_apply(*(np.asarray(c, np.uint16) for c in (r, g, b)), self.look_id, self.tint, mode=0)
         return np.stack([r, g, b], -1).astype(np.int32)                    # 0..16383 encoded
 
 
