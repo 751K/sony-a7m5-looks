@@ -112,7 +112,7 @@ Sony 创意外观可以视为一个从**白平衡后的相机原生 RGB** 到**�
 - Capture One 的 *E* 依赖所选影调曲线，配置只在 Linear Response 下有效。
 - Camera Raw 的底座 DCP 将 ForwardMatrix 设为线性 ProPhoto → XYZ D50，影调曲线设为恒等，使 Camera Raw 的工作空间与白平衡后的相机 RGB 一致，避免叠加 Adobe 自身的色彩和影调。
 
-各部分的推导过程和中间结果见 [docs/pipeline.md](docs/pipeline.md)、[docs/capture_one.md](docs/capture_one.md)、[docs/camera_raw.md](docs/camera_raw.md)。
+处理管线的最终结论见 [docs/pipeline.md](docs/pipeline.md)（推导过程在它的 git 历史里），两家宿主软件的标定见 [docs/capture_one.md](docs/capture_one.md)、[docs/camera_raw.md](docs/camera_raw.md)。
 
 ## 重新生成
 

@@ -14,9 +14,9 @@ inserts).  Edit's creative-look sliders are applied too: contrast / highlights /
 shadows in MainGamma's second curve family, hue + saturation in ZcTaskHueSaturation,
 black / white level in the YGamma pixel path, Fineness in Sharpness, and the
 exposure setting in both the WB gains and the ChromaSuppress thresholds
-(settings ids: see develop_settings.CONTRAST etc. and docs/pipeline.md §10.27).
+(settings ids: see develop_settings.CONTRAST etc. and docs/pipeline.md §7.2).
 The tone-curve tool (0x9000-0x9007, R/G/B/Y) and peripheral illumination
-(0x8030-0x8032, 0x900e/0x900f) run at the end of the look chain (§10.28).
+(0x8030-0x8032, 0x900e/0x900f) run at the end of the look chain (docs/pipeline.md §6.2–§6.3).
 
 The output is the decoder rectangle (DefaultCropOrigin/Size), e.g. 7008x4672 for
 the A7M5, as uint16 0..16383 in the requested output color space

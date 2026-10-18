@@ -117,7 +117,7 @@ Two further points:
 - In Capture One, *E* depends on the selected tone curve, so the profiles are valid only with Linear Response.
 - The Camera Raw base DCP sets its ForwardMatrix to linear ProPhoto → XYZ D50 and its tone curve to identity. Camera Raw's working space then equals white-balanced camera RGB, and Adobe's own colour and tone are not added.
 
-The derivations and intermediate results are in [docs/pipeline.md](docs/pipeline.md), [docs/capture_one.md](docs/capture_one.md) and [docs/camera_raw.md](docs/camera_raw.md) (Chinese).
+The pipeline is summarised in [docs/pipeline.md](docs/pipeline.md) (final conclusions; the derivations are in its git history), and the host calibrations in [docs/capture_one.md](docs/capture_one.md) and [docs/camera_raw.md](docs/camera_raw.md) (all Chinese).
 
 ## Regenerating the profiles
 

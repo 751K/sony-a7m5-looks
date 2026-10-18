@@ -30,7 +30,7 @@ _TYPES = {1: ("B", 1), 2: ("s", 1), 3: ("H", 2), 4: ("I", 4), 5: ("II", 8),
           6: ("b", 1), 7: ("B", 1), 8: ("h", 2), 9: ("i", 4), 10: ("ii", 8),
           11: ("f", 4), 12: ("d", 8), 13: ("I", 4)}
 
-# Common ids (see docs/pipeline.md §10.7)
+# Common ids (see docs/pipeline.md §7.2)
 WB_MODE, WB_TEMPERATURE, WB_TINT, RB_FACTOR = 0x8002, 0x8013, 0x8014, 0x8015
 EXPOSURE, NR_ON, DRO_ON, CLARITY = 0x8018, 0x801E, 0x8022, 0x901C
 NR_STRENGTH = 0x8029                      # dev+0x224 (Marble d224)
