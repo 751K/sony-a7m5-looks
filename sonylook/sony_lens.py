@@ -24,27 +24,46 @@ from sony_look import fma32
 f32 = np.float32
 
 
-def _lerp_table(tab, n, t):
+def _lerp_base(n, t):
+    """Index, fraction and in-range mask shared by the three channel tables."""
     i = np.floor(np.maximum(t, 0)).astype(np.int64)       # fcvtmu
     inside = (i < n - 1)
     ic = np.clip(i, 0, n - 2)
+    frac = (t - ic.astype(f32)).astype(f32)
+    return ic, frac, inside
+
+
+def _lerp_from(tab, n, ic, frac, inside):
     a, b = tab[ic].astype(f32), tab[ic + 1].astype(f32)
-    v = fma32((b - a).astype(f32), (t - ic.astype(f32)).astype(f32), a)
+    v = fma32((b - a).astype(f32), frac, a)
     return np.where(inside, v, f32(tab[n - 1])).astype(f32)
 
 
-def src_coords(px, py, L, k):
-    """px, py: float32 output coordinates; L: dict from lens_struct(); k: 0 R, 1 G, 2 B."""
+def _lerp_table(tab, n, t):
+    return _lerp_from(tab, n, *_lerp_base(n, t))
+
+
+def _coords_base(px, py, L):
+    """Per-pixel terms that do not depend on the channel: centre, radius, table index."""
     cx, cy = f32(L["cx"]), f32(L["cy"])
     dx, dy = (px - cx).astype(f32), (py - cy).astype(f32)
     r = np.sqrt(fma32(dy, dy, (dx * dx).astype(f32))).astype(f32)
     t = ((f32(L["s2"]) * r).astype(f32) / f32(L["step"])).astype(f32)
-    f = _lerp_table(np.asarray(L["tables"][k], f32), L["n"], t)
+    return (cx, cy) + _lerp_base(L["n"], t)
+
+
+def _channel_coords(px, py, L, k, cx, cy, ic, frac, inside):
+    f = _lerp_from(np.asarray(L["tables"][k], f32), L["n"], ic, frac, inside)
     ox, oy = (L["off"][k] if k != 1 else (f32(0), f32(0)))
     s = f32(L["s"])
     sx = fma32((f * ((f32(ox) + px).astype(f32) - cx).astype(f32)).astype(f32), s, cx)
     sy = fma32((f * ((f32(oy) + py).astype(f32) - cy).astype(f32)).astype(f32), s, cy)
     return sx, sy
+
+
+def src_coords(px, py, L, k):
+    """px, py: float32 output coordinates; L: dict from lens_struct(); k: 0 R, 1 G, 2 B."""
+    return _channel_coords(px, py, L, k, *_coords_base(px, py, L))
 
 
 def bilinear_u16(plane, fx, fy):
@@ -70,9 +89,11 @@ def geocorr_u16(planes, origin, region, L):
     region: output (x0, y0, x1, y1) in whole-image coordinates. Returns 3 x (y1-y0, x1-x0)."""
     x0, y0, x1, y1 = region
     px, py = np.meshgrid(np.arange(x0, x1).astype(f32), np.arange(y0, y1).astype(f32))
+    # radius and table index depend only on the output pixel, not the channel
+    base = _coords_base(px, py, L)
     out = []
     for k in range(3):
-        sx, sy = src_coords(px, py, L, k)
+        sx, sy = _channel_coords(px, py, L, k, *base)
         out.append(bilinear_u16(planes[k], (sx - f32(origin[0])).astype(f32), (sy - f32(origin[1])).astype(f32)))
     return out
 

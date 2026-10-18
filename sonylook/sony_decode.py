@@ -10,8 +10,16 @@ Pipeline, in the builder's order:
 Every stage is the bit-exact port in this directory.  Optional stages follow the
 develop settings when Edit saved the ARW (sonylook/develop_settings.py); for a
 camera-original ARW they default off (except SSCS, which the builder always
-inserts).  The output is the decoder rectangle (DefaultCropOrigin/Size), e.g.
-7008x4672 for the A7M5, as uint16 0..16383 in the requested output color space
+inserts).  Edit's creative-look sliders are applied too: contrast / highlights /
+shadows in MainGamma's second curve family, hue + saturation in ZcTaskHueSaturation,
+black / white level in the YGamma pixel path, Fineness in Sharpness, and the
+exposure setting in both the WB gains and the ChromaSuppress thresholds
+(settings ids: see develop_settings.CONTRAST etc. and docs/pipeline.md §10.27).
+The tone-curve tool (0x9000-0x9007, R/G/B/Y) and peripheral illumination
+(0x8030-0x8032, 0x900e/0x900f) run at the end of the look chain (§10.28).
+
+The output is the decoder rectangle (DefaultCropOrigin/Size), e.g. 7008x4672 for
+the A7M5, as uint16 0..16383 in the requested output color space
 ("srgb" or "adobe", LinearMatrix16 output_mode 0/1).  sony_export.write_image()
 turns that into Edit's 8/16-bit TIFF or JPEG with the bundled ICC profile.
 
@@ -20,6 +28,7 @@ Not ported (and not running for the current files): ToneCurve, ShadeCorrection,
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -61,7 +70,8 @@ def _sr2_tags(arw):
 
 
 def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble=None,
-           detail=True, lens=True, sscs=True, pad=32, strip=512, verbose=False):
+           detail=True, lens=True, sscs=True, pad=32, strip=512, verbose=False,
+           rust=None):
     """Decode an ARW to the exported image (H, W, 3) uint16 0..16383.
 
     output: "srgb" or "adobe" (AdobeRGB).  The look's LinearMatrix16 table is built
@@ -85,6 +95,7 @@ def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble
     timings = {}
     arw = Path(arw)
     output = EXP.normalize_space(output)
+    use_rust = (os.environ.get("SONYLOOK_RUST", "0") == "1") if rust is None else bool(rust)
 
     main = AL.main_tags(str(arw))
     tags = _sr2_tags(arw)
@@ -95,6 +106,27 @@ def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble
     k7809 = int(main["0x7809"])
     dec = DP.decoder_params(arw)
     iso = int(dec["iso"])
+    exposure = int(st.get(DS.EXPOSURE, 0))
+    # Edit sliders (all 0 by default): MainGamma tone family, HueSaturation,
+    # YGamma black/white levels.
+    tone = dict(contrast=int(st.get(DS.CONTRAST, 0)),
+                highlight=int(st.get(DS.HIGHLIGHT_LEVEL, 0)),
+                shadow=int(st.get(DS.SHADOW_LEVEL, 0)),
+                hue=int(st.get(DS.HUE, 0)),
+                saturation=int(st.get(DS.SATURATION, 0)),
+                white_level=int(st.get(DS.WHITE_LEVEL, 0)),
+                black_level=int(st.get(DS.BLACK_LEVEL, 0)),
+                exposure=exposure)
+    # Tone curve tool (R, G, B, Y) and peripheral illumination.
+    def _seq(v):
+        return v if isinstance(v, (list, tuple)) else (v,)
+    tone_curves = [(_seq(st.get(DS.TONE_CURVE_X[k], (0, 511))),
+                    _seq(st.get(DS.TONE_CURVE_Y[k], (0, 511)))) for k in range(4)]
+    shade = dict(amount=int(st.get(DS.SHADE_AMOUNT, 80)),
+                 radius=int(st.get(DS.SHADE_RADIUS, 0)),
+                 strength=int(st.get(DS.SHADE_STRENGTH, 0)),
+                 flag=int(st.get(DS.SHADE_FLAG, 0)),
+                 angle=int(st.get(DS.SHADE_ANGLE, 0)))
 
     if raw is None:
         import rawpy
@@ -108,11 +140,11 @@ def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble
     mode = int(st.get(DS.WB_MODE, 1))
     if mode == 3:
         sr, sb = F.wb_pick_state(arw, raw, black, levels)
-        gains = F.wb_gains(levels, k7809, 0, int(st.get(DS.EXPOSURE, 0)), mode=3,
+        gains = F.wb_gains(levels, k7809, 0, exposure, mode=3,
                            state_r=sr, state_b=sb, rb_factor=int(st.get(DS.RB_FACTOR, 0)))
     else:
         gains = F.wb_gains(levels, k7809, int(st.get(DS.WB_TINT, 0)),
-                           int(st.get(DS.EXPOSURE, 0)), mode=mode,
+                           exposure, mode=mode,
                            temperature=st.get(DS.WB_TEMPERATURE, 6000),
                            temp_table=F.wb_temperature_table(main),
                            presets=F.wb_presets(main), rb_factor=int(st.get(DS.RB_FACTOR, 0)))
@@ -140,7 +172,7 @@ def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble
 
     # --- ITP (1024 tiling, 12 px halo) ----------------------------------------
     t = time.perf_counter()
-    planes = list(ITP.itp_full_image(raw, black, gains, s7311))
+    planes = list(ITP.itp_full_image(raw, black, gains, s7311, rust=use_rust))
     timings["itp"] = time.perf_counter() - t
 
     # --- DRO / Vatr (dev+0x238 / 0x8022) --------------------------------------
@@ -170,10 +202,19 @@ def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble
         L = LN.lens_from_arw(arw, dist_setting=int(st.get(DS.DISTORTION, -1)),
                              ca_setting=int(st.get(DS.CA_CORRECTION, 1)))
         H, W = planes[0].shape
+        rust_geo, rust_lens = None, None
+        if use_rust:
+            import fused_rust as FR
+            if FR.available():
+                rust_geo, rust_lens = FR, FR.lens_config(L)
         out = [np.empty((H, W), np.uint16) for _ in range(3)]
         for ya in range(0, H, GEO_STRIP):
             yb = min(ya + GEO_STRIP, H)
-            ch = LN.geocorr_u16(planes, (ox, oy), (ox, oy + ya, ox + W, oy + yb), L)
+            if rust_geo is not None:
+                ch = rust_geo.geocorr_u16(planes, (ox, oy),
+                                          (ox, oy + ya, ox + W, oy + yb), rust_lens)
+            else:
+                ch = LN.geocorr_u16(planes, (ox, oy), (ox, oy + ya, ox + W, oy + yb), L)
             for k in range(3):
                 out[k][ya:yb] = ch[k]
         planes = out
@@ -193,9 +234,15 @@ def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble
     if detail is None:
         detail = True
     if detail:
-        P = SDT.sharpness_params(dev208=int(st.get(0x801A, 0)), dev20c=int(st.get(0x801B, 0)),
-                                 dev210=int(st.get(0x801C, 0)), dev214=int(st.get(0x801D, 0)))
-        detail_cfg = dict(sharp=P, spica=(SDT.load_srsettings(), SDT.spica_params(iso)))
+        P = SDT.sharpness_params(dev208=int(st.get(DS.SHARPNESS_GAIN, 0)),
+                                 dev20c=int(st.get(DS.SHARPNESS_OVERSHOOT, 0)),
+                                 dev210=int(st.get(DS.SHARPNESS_UNDERSHOOT, 0)),
+                                 dev214=int(st.get(DS.SHARPNESS_THRESHOLD, 0)),
+                                 dev2c4=int(st.get(DS.SHARPNESS_FINENESS, 50)))
+        # Sharpness and Spica both read ApConGain (dev+0x208) and Fineness (dev+0x2c4)
+        detail_cfg = dict(sharp=P, spica=(SDT.load_srsettings(), SDT.spica_params(iso)),
+                          dev208=int(st.get(DS.SHARPNESS_GAIN, 0)),
+                          dev2c4=int(st.get(DS.SHARPNESS_FINENESS, 50)))
 
     mlook = MB.look_from_tags(tags)
     mdev = DS.marble_dev(st)
@@ -215,20 +262,24 @@ def decode(arw, look=None, *, output="srgb", raw=None, nr=None, dro=None, marble
     # Fade: dev+0x2bc = 10 x Fade (setting 0x901b).  Edit's default table has no FL2/FL3
     # rows, so an unsaved file renders those with Fade 0; IN / SH use 3 / 6.
     if DS.FADE in st:
-        fade = int(st[DS.FADE]) // 10          # the slider is whole steps
+        fade_level = DS.fade_dev(st)           # dev+0x2bc as saved (10 x the slider)
+        fade = None
     else:
+        fade_level = None
         fade = 0 if look in ("FL2", "FL3") else None
-    lk = R.Look(look, looks, fade=fade, output_mode=1 if output == "adobe" else 0)
+    lk = R.Look(look, looks, fade=fade, fade_level=fade_level,
+                output_mode=1 if output == "adobe" else 0,
+                tone_curves=tone_curves, shade=shade, use_rust=use_rust, **tone)
     rt = {}
     if marble:
         # One render pass: Marble runs on the YCC2RGB result, and the 16-px border keeps the
         # pre-Marble value of that same array (the old code rendered the whole look chain twice).
-        img = np.asarray(lk.render(lin, detail=detail_cfg, marble=marble_cfg,
-                                   sscs=sscs_params, marble_inset=16, timings=rt,
-                                   strip=strip), np.uint16)
+        img = lk.render(lin, detail=detail_cfg, marble=marble_cfg,
+                        sscs=sscs_params, marble_inset=16, timings=rt,
+                        strip=strip)
     else:
-        img = np.asarray(lk.render(lin, detail=detail_cfg, marble=None,
-                                   sscs=sscs_params, timings=rt, strip=strip), np.uint16)
+        img = lk.render(lin, detail=detail_cfg, marble=None,
+                        sscs=sscs_params, timings=rt, strip=strip)
     # crop back to the decoder rectangle
     ty, tx = y0 - ey0, x0 - ex0
     img = img[ty:ty + (y1 - y0), tx:tx + (x1 - x0)]
@@ -261,11 +312,14 @@ def main():
     ap.add_argument("--no-sscs", action="store_true")
     ap.add_argument("--pad", type=int, default=32, help="expand the decoder rect by N px of raw margin")
     ap.add_argument("--strip", type=int, default=512, help="row-band height for the render (0 = whole image)")
+    ap.add_argument("--rust", action="store_true",
+                    help="use the optional Rust fused render core (needs rust/sonylook_core built)")
     a = ap.parse_args()
     img = decode(a.arw, a.look, output=a.color_space,
                  nr=False if a.no_nr else None, dro=False if a.no_dro else None,
                  marble=False if a.no_marble else None, detail=not a.no_detail,
-                 lens=not a.no_lens, sscs=not a.no_sscs, pad=a.pad, strip=a.strip, verbose=True)
+                 lens=not a.no_lens, sscs=not a.no_sscs, pad=a.pad, strip=a.strip, verbose=True,
+                 rust=True if a.rust else None)
     print(img.shape, img.dtype, int(img.min()), int(img.max()))
     if a.out:
         out = EXP.write_image(img, a.out, color_space=a.color_space,

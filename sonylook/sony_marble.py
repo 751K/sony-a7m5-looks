@@ -218,9 +218,15 @@ def marble(r, g, b, look, dev, dec, region=None, mode=0):
     H, W = np.shape(r)
     x0, y0, x1, y1 = region if region is not None else (0, 0, W, H)
     bnr = dev["d218"] == 1 and look.s16(0x109c) != 0
-    lum = dev["d2c0"]
+    lum = int(dev["d2c0"])
     if not bnr and lum == 0:
         return (r, g, b), (x0, y0, x1, y1)
+    # FUN_100126f0c indexes 11-level tables with q = lum / 10; only 0..109 is in range.
+    # (Edit's gate is lum == 0, so negatives do run there, but with q = trunc(lum / 10)
+    # it reads below the table — undefined behaviour, reproduced nowhere.)  The UI and
+    # develop_settings.marble_dev() refuses values outside 0..109.
+    if not 0 <= lum <= 109:
+        raise ValueError(f"clarity {lum} outside the strength tables' 0..109 range")
     T = E.tables()
     sl = (slice(y0, y1), slice(x0, x1))
     planes = [np.array(p, np.int64) for p in (r, g, b)]
@@ -285,6 +291,8 @@ def marble(r, g, b, look, dev, dec, region=None, mode=0):
              a8=_cdiv(k24 * look.s16(0x10b4), 5) + look.s16(0x10b4),
              l98=look.s16(0x10bc) & 0x7f, l94=look.s16(0x10be) & 0x7f, l90=look.s16(0x10c0) & 0x7f,
              l8c=look.s16(0x10c2) & 0x7f, l88=look.s16(0x10c4))
+    # C division (sdiv + msub in FUN_100126f0c) truncates toward zero; for the
+    # 0..109 values that reach here that is the same as Python's floor division.
     q, r10 = lum // 10, lum % 10
     if look.u8(0x113e) == 0:
         gate, lo_l, hi_l, g34, g38, g3c, g40, thrY, a_y = 0, 0, 0, 0, 0, 0, 0, 0, 0

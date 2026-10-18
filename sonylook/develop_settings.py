@@ -37,6 +37,29 @@ NR_STRENGTH = 0x8029                      # dev+0x224 (Marble d224)
 DISTORTION, CA_CORRECTION = 0x8040, 0x900D
 PICKER_BOX, PICKER_USE_GAINS, PICKER_GAINS = 0x8021, 0x9015, 0x9016
 
+# Creative Look sliders.  FUN_1000aac90 maps each id to a dev field; the names are
+# the key strings Edit's own settings loader uses (0x1001f52xx..0x1001f5dxx):
+#   Saturation  -> +0x1fc (HueSaturation, 1 + 0.01*s)
+#   Contrast    -> +0x200 (MainGamma curve family index)
+#   Hue         -> +0x204 (HueSaturation, 0.35/0.7 deg per step)
+#   BlackLevel  -> +0x2ac, WhiteLevel -> +0x2b0 (YGamma knee and slope)
+#   HighlightLevel -> +0x2b4, ShadowLevel -> +0x2b8 (MainGamma curve family halves)
+#   Fineness    -> +0x2c4 (Sharpness)
+SATURATION, CONTRAST, HUE = 0x8016, 0x8017, 0x8019
+BLACK_LEVEL, WHITE_LEVEL = 0x9018, 0x9017
+HIGHLIGHT_LEVEL, SHADOW_LEVEL = 0x9019, 0x901A
+SHARPNESS_FINENESS = 0x901D
+SHARPNESS_GAIN, SHARPNESS_OVERSHOOT = 0x801A, 0x801B
+SHARPNESS_UNDERSHOOT, SHARPNESS_THRESHOLD = 0x801C, 0x801D
+
+# Tone curve tool: curve k (R, G, B, Y) uses x points 0x9000+k and y points
+# 0x9004+k, both on a 0..511 scale.
+TONE_CURVE_X = (0x9000, 0x9001, 0x9002, 0x9003)     # R, G, B, Y
+TONE_CURVE_Y = (0x9004, 0x9005, 0x9006, 0x9007)
+# ShadeCorrection / peripheral illumination.
+SHADE_AMOUNT, SHADE_RADIUS, SHADE_STRENGTH = 0x8030, 0x8031, 0x8032
+SHADE_FLAG, SHADE_ANGLE = 0x900E, 0x900F
+
 
 def _ifd(data: bytes, base: int, off: int) -> dict:
     start = base + off
@@ -167,7 +190,9 @@ def camera_defaults(arw) -> dict:
     look_id = R.LOOK_IDS.get(name, 0)
     fade = 10 * R.CAMERA_FADE.get(name, 0) if look_id not in (0x16, 0x17) else 0
     return {LOOK_SELECT: 1, WB_MODE: 1, NR_ON: nr, DRO_ON: dro, DRO_LEVEL: level,
-            DISTORTION: dist, CA_CORRECTION: ca, CLARITY: MB.clarity_default(look_id), FADE: fade}
+            DISTORTION: dist, CA_CORRECTION: ca, CLARITY: MB.clarity_default(look_id), FADE: fade,
+            SHARPNESS_FINENESS: 50, SHADE_AMOUNT: 80, SHADE_RADIUS: 0, SHADE_STRENGTH: 0,
+            SHADE_FLAG: 0, SHADE_ANGLE: 0}
 
 
 def effective_settings(arw) -> dict:
@@ -176,11 +201,47 @@ def effective_settings(arw) -> dict:
     return st if st else camera_defaults(arw)
 
 
+def _s32(v) -> int:
+    """A 32-bit setting as Edit's consumers read it (`*(int *)(dev+off)`).
+
+    The block stores these as LONG or SLONG; read_settings() honours the type, so a
+    tampered LONG 0xFFFFFFFB arrives as 4294967291 here but is -5 to Edit.
+    """
+    v = int(v) & 0xFFFFFFFF
+    return v - (1 << 32) if v >= (1 << 31) else v
+
+
+def fade_dev(settings) -> int:
+    """dev+0x2bc (setting 0x901b, 10 x the 0..9 Fade slider) as Edit sees it.
+
+    Like Clarity, the setting is copied into the dev struct unchecked (FUN_1000aac90)
+    and consumed as a YGamma level.  Every level >= 0 is deterministic in Edit
+    (non-multiples of 10 interpolate, > 90 extrapolates with q = 8; verify_ycc_stages
+    checks 15, 37, 95 and 200 against the emulator), so those pass through unchanged.
+    A negative level makes FUN_1000d71fc's q = level / 10 negative and read below its
+    10-entry gain table -- undefined in Edit -- and raises ValueError.
+    """
+    level = _s32(settings.get(FADE, 0))
+    if level < 0:
+        raise ValueError(f"Fade level {level} (setting 0x901b) < 0: not defined in Edit")
+    return level
+
+
 def marble_dev(settings) -> dict:
-    """`dev` dict for sony_marble.marble: NR on (d218), strength (d224), clarity (d2c0)."""
+    """`dev` dict for sony_marble.marble: NR on (d218), strength (d224), clarity (d2c0).
+
+    Edit's slider is 0..100 (GfDocument::ModifyClarity clamps before it writes dev+0x2c0),
+    but the settings block is copied into the dev struct without a check (FUN_1000aac90:
+    get 0x901c -> str dev+0x2c0), so a saved value reaches Marble as is.  0..109 indexes
+    the 11-level strength tables (q = lum / 10) and is reproduced exactly; a negative
+    value or >= 110 reads outside them in Edit (undefined) and raises ValueError.
+    """
+    clarity = _s32(settings.get(CLARITY, 0))
+    if not 0 <= clarity <= 109:
+        raise ValueError(f"Clarity {clarity} (setting 0x901c) outside 0..109: not defined in Edit")
     return dict(d218=int(settings.get(NR_ON, 0)),
                 d224=int(settings.get(NR_STRENGTH, 0)),
-                d2c0=int(settings.get(CLARITY, 0)))
+                d2c0=clarity)
 
 
 if __name__ == "__main__":

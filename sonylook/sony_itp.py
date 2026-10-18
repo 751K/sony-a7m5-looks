@@ -16,6 +16,7 @@ int total_bytes, float *data}; row stride = ((w*4 + 31) & ~31) + 32.
 """
 from __future__ import annotations
 
+import os
 import struct
 
 import numpy as np
@@ -674,7 +675,7 @@ def _edge_indices(n: int, pad: int) -> np.ndarray:
 
 
 def itp_full_image(raw, black, gains, scale_7311, tile: int = 1024, halo: int = 12,
-                   params: bytes = PARAMS_DEFAULT):
+                   params: bytes = PARAMS_DEFAULT, rust=None):
     """Run the ITP over a whole image using Sony's 1024x1024 tile grid.
 
     FUN_100139788 fixes the tile size at 0x400 x 0x400 and 0x1000de588 builds
@@ -684,6 +685,16 @@ def itp_full_image(raw, black, gains, scale_7311, tile: int = 1024, halo: int = 
     parity-preserving edge extension from TileDiv.
     """
     raw = np.asarray(raw)
+    # The Rust path runs the edge extension, tile grid, tile kernels and their
+    # thread pool in one call; only the NumPy path below builds `padded`.
+    use_rust = (os.environ.get("SONYLOOK_RUST", "0") == "1") if rust is None else bool(rust)
+    if use_rust:
+        import fused_rust as FR
+        if FR.available():
+            threads = int(os.environ.get("SONYLOOK_THREADS", "6"))
+            return tuple(FR.itp_full_image(raw, black, gains, scale_7311,
+                                           FR.itp_config(params), tile=tile, halo=halo,
+                                           threads=threads))
     h, w = raw.shape
     rows = _edge_indices(h, halo)
     cols = _edge_indices(w, halo)

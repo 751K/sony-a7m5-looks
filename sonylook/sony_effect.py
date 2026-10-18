@@ -53,6 +53,12 @@ def _q14(x):
 @lru_cache(maxsize=1)
 def tables():
     """{name: int16[16384]} for input codes 0..16383 (FUN_1000db9f4 entries 0x8000..0xbfff)."""
+    try:
+        import fused_rust as FR
+        if FR.available():
+            return FR.effect_tables()
+    except Exception:
+        pass
     g_dec, g_enc, s_enc, s_dec = (np.zeros(16384, np.int16) for _ in range(4))
     k_g, k_ge = _bits(0x400cc000), _bits(0x3ee8cf59)          # 2.19921875, 1/2.19921875
     k_s = _bits(0x3ed55555)                                     # 1/2.4

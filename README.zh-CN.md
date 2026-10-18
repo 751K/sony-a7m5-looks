@@ -78,8 +78,8 @@ Sony 创意外观可以视为一个从**白平衡后的相机原生 RGB** 到**�
 - 每种外观都按相机里创意外观的默认参数渲染：12 种外观的对比度、高光、阴影、饱和度都是 0；褪色 FL2/FL3 为 1，IN 为 3，SH 为 6。
 - 锐化、降噪、清晰度、DRO 等阶段依赖邻域像素，不属于逐像素映射，不纳入配置。
 - 解码器的去马赛克（ZcTaskITP）已逐位移植到 `sonylook/sony_itp.py`，包括 Sony 的 1024 像素分块，不进入配置文件。
-- 完整解码器已串联在 `sonylook/sony_decode.py`：`decode(arw)` 依次运行 RawNR、ITP、DRO、镜头几何、SSCS、外观链和 Marble；DSC03591 的全图 7008×4672 与 Edit 导出的 8 位 MAE 为 0.13。
-- 配置文件也包含 SSCS（`sonylook/sony_sscs.py`）。严格来说它属于外观之前的解码器阶段，但它是逐像素的，在两个软件里都能改善结果（见上文）。Edit 的 3D LUT 和色相/饱和度两个阶段在默认参数下不运行。
+- 完整解码器已串联在 `sonylook/sony_decode.py`：`decode(arw)` 依次运行 RawNR、ITP、DRO、镜头几何、SSCS、外观链和 Marble；DSC03591 的全图 7008×4672 与 Edit 导出的 8 位 MAE 为 0.13。加 `--rust` 会走可选的 Rust 内核，输出逐位相同。
+- 配置文件也包含 SSCS（`sonylook/sony_sscs.py`）。严格来说它属于外观之前的解码器阶段，但它是逐像素的，在两个软件里都能改善结果（见上文）。Edit 的 3D LUT 在默认参数下不运行；色相/饱和度只在对应滑块非 0 时运行。曲线工具（Y/R/G/B）和周辺光量补偿已逐位移植（`sonylook/sony_tonecurve.py`、`sony_shade.py`），在参数非默认时接在链路末尾。
 
 ### 2. 查找表表示
 
@@ -116,7 +116,7 @@ Sony 创意外观可以视为一个从**白平衡后的相机原生 RGB** 到**�
 
 ## 重新生成
 
-需要：Python 3.11+、`pip install -r requirements.txt`、任意一张 A7M5 的 ARW，以及本机安装的 **Imaging Edge Edit 4.0.00.10312**（macOS）。
+需要：Python 3.11+、`pip install -r requirements.txt`、任意一张 A7M5 的 ARW，以及本机安装的 **Imaging Edge Edit 4.0.00.10312**（macOS）。可选：Rust 工具链（`cargo`），用于加速的 `--rust` 解码；NumPy 路径不需要 Rust。一次性 LUT 会缓存在 `~/.cache/sonylook`（`SONYLOOK_CACHE=0` 关闭，`SONYLOOK_CACHE_DIR` 改目录）。
 
 外观链用到的一些常量表（色相 atan 表、对比度曲线族等）是在运行时从你本机安装的 Edit 里读取的（`sonylook/edit_binary.py`），本仓库不包含任何 Sony 的二进制或数据。脚本会校验 arm64 部分的 SHA-256；其他版本的表地址不同，无法使用。路径可以用 `SONY_EDIT_BINARY` 指定。
 
@@ -143,7 +143,9 @@ python3 sonylook/sony_render.py /path/to/A7M5.ARW Standard FL2 --scale 4
 python3 sonylook/sony_decode.py /path/to/A7M5.ARW --out out.tif
 ```
 
-输出 7008×4672 的解码器矩形，可选 16 位 TIFF 或 8 位 JPEG / PNG，色彩空间 sRGB 或 Adobe RGB（`--color-space srgb|adobe`、`--bits 8|16`），并嵌入你本机 Edit 自带的 ICC 配置。外观和可选阶段按 ARW 里 Edit 保存的显影设置决定；没保存过的文件，按 Edit 首次打开时的初始值（拍摄时的外观、相机的降噪和 DRO、镜头校正开、该外观的默认清晰度）；`--no-nr`、`--no-dro`、`--no-marble`、`--no-detail`、`--no-lens`、`--no-sscs` 可分别关闭。
+输出 7008×4672 的解码器矩形，可选 16 位 TIFF 或 8 位 JPEG / PNG，色彩空间 sRGB 或 Adobe RGB（`--color-space srgb|adobe`、`--bits 8|16`），并嵌入你本机 Edit 自带的 ICC 配置。外观、可选阶段、Edit 的 Creative Look 滑块（对比度、高光、阴影、色相、饱和度、黑白位、锐度精细度和曝光）、曲线工具（Y/R/G/B）和周辺光量补偿按 ARW 里 Edit 保存的显影设置决定；没保存过的文件，按 Edit 首次打开时的初始值（拍摄时的外观、相机的降噪和 DRO、镜头校正开、该外观的默认清晰度、滑块为 0）；`--no-nr`、`--no-dro`、`--no-marble`、`--no-detail`、`--no-lens`、`--no-sscs` 可分别关闭。
+
+可选的 Rust 内核（`rust/sonylook_core`）把渲染 band 中的逐像素部分、Sharpness / YGamma / Spica / YCC2RGB 融合在一起，并移植了 GeoCorr、ITP 去马赛克、Marble 和 SSCS。用 `cargo build --release --manifest-path rust/sonylook_core/Cargo.toml` 构建，然后加 `--rust`。输出与 NumPy 路径逐位相同；测试图上融合阶段从 21 s 降到 0.5 s，GeoCorr 从 6.9 s 降到 0.5 s，ITP 从 5.8 s 降到 0.6 s，Marble 从 5 s 降到 0.5 s，SSCS 从 1.4 s 降到 0.1 s，完整 decode 从 42 s 降到 3.2 s。NumPy 仍是默认后端和参考实现；开启降噪时 Marble 的 chroma 分支仍走 NumPy。一次性 LUT 构造也做了优化：MainGamma 和 Effect 表在 Rust 里构建，LinearMatrix16/YGamma 表缓存在 `~/.cache/sonylook`（`SONYLOOK_CACHE=0` 关闭，`SONYLOOK_CACHE_DIR` 改目录）。线程数由 `SONYLOOK_THREADS`、`SONYLOOK_BAND_THREADS`、`SONYLOOK_MARBLE_THREADS` 控制，详见 `rust/README.md`。
 
 ### 重新标定（换软件版本时）
 
@@ -167,6 +169,7 @@ python3 sonylook/sony_decode.py /path/to/A7M5.ARW --out out.tif
 | `profiles/`    | 生成好的配置：C1 的 ICC，ACR 的 DCP 和 XMP                                             |
 | `chart/`       | 合成色卡：`SonyChart.ARW`（可直接用 C1 / ACR 打开）、色块定义 `SonyChart.json`、预览图            |
 | `sonylook/`    | Sony 外观链与前端的 Python 移植，以及 ARW / Edit 读取器。另含 RawNR、DRO、锐化 / Spica、Marble、镜头几何校正（都不用于配置）、BW/SE 的 Effect 阶段（用于配置），以及整图解码器 `sony_decode.py` |
+| `rust/`        | 可选的 Rust 内核（`sonylook_core`）：融合渲染 band、GeoCorr、ITP、Marble、SSCS 和表构造。见 `rust/README.md` |
 | `capture_one/` | C1 配置生成、合成色卡、测量与对比                                                          |
 | `camera_raw/`  | ACR 表格式、DCP 读写、配置生成、测量与对比                                                   |
 | `docs/`        | 研究记录：处理链细节、C1 和 ACR 的标定过程。文中提到的证据文件、测试导出不在本仓库                               |

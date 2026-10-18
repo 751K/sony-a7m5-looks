@@ -12,3 +12,4 @@ render_output/
 *.tiff
 chart/measure_*.json
 chart/*.npy
+rust/sonylook_core/target/

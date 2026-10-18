@@ -42,9 +42,14 @@ def fma32(a, b, c):
     a*b of two float32 is exact in float64. The float64 sum may round to a
     float32 midpoint; only those (rare) lanes need the TwoSum residual that
     picks the side, so the residual is computed for the candidates alone.
+    The sum is accumulated in place to save a full-size temporary; the
+    midpoint path recomputes the exact product for its few candidates.
     """
-    p = np.multiply(a, b, dtype=np.float64)
-    s = np.add(p, c, dtype=np.float64)
+    s = np.multiply(a, b, dtype=np.float64)
+    try:
+        s += c
+    except ValueError:                 # c broadcasts to a larger shape than a*b
+        s = np.add(s, c, dtype=np.float64)
     r = s.astype(np.float32)
     bits = s.view(np.uint64)
     mid = (bits & np.uint64((1 << 29) - 1)) == np.uint64(1 << 28)
@@ -54,15 +59,19 @@ def fma32(a, b, c):
         idx = np.flatnonzero(mid.reshape(-1))
         if idx.size:
             shape = s.shape if s.ndim else (1,)
-            pp = p.reshape(-1)[idx]
-            ss = s.reshape(-1)[idx]
             ii = np.unravel_index(idx, shape)
-            cc = np.broadcast_to(np.asarray(c, np.float64), shape)[ii]
+            # gather first, then widen: converting a whole plane just to read a
+            # handful of candidates would cost more than the fma itself
+            aa = np.broadcast_to(a, shape)[ii].astype(np.float64)
+            bb0 = np.broadcast_to(b, shape)[ii].astype(np.float64)
+            pp = aa * bb0                  # exact: float32 x float32 in float64
+            ss = s.reshape(-1)[idx]
+            cc = np.broadcast_to(c, shape)[ii].astype(np.float64)
             bb = ss - pp
             err = (pp - (ss - bb)) + (cc - bb)
             ok = err != 0
             if ok.any():
-                rr = np.array(r, copy=True).reshape(-1)
+                rr = r.reshape(-1)         # r is a fresh array from astype
                 sm = ss[ok]
                 lo = sm.astype(np.float32)
                 lo = np.where(lo.astype(np.float64) > sm,

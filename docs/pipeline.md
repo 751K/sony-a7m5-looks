@@ -28,12 +28,13 @@
 | Sharpness、Spica | 逐位移植 | 否 | §10.13 |
 | YGamma（0x780b–0x780e，含默认褪色） | 逐位移植 | 是 | §9、§10.18 |
 | 3DLut | 应用部分已移植；**表的构建链未分析**。默认参数下不运行（0x8026 = 0） | 默认不用 | §9.5、§10.7 |
-| HueSaturation | 已移植。只在色相/饱和度滑块非 0 时运行 | 默认不用 | §9.4 |
+| HueSaturation | 已移植并接入 decode；只在色相/饱和度滑块非 0 时运行 | 默认不用 | §9.4、§10.27 |
 | YNR | 本机型默认不运行（dev+0x22c = 0） | — | §10.15 |
 | YCC2RGB | 逐位移植 | 是 | §9 |
 | Marble（清晰度 / 色度降噪） | 逐位移植 | 否 | §10.16 |
 | Effect（BW / SE） | 逐位移植 | 是 | §10.14 |
-| ToneCurve、ShadeCorrection | 本图参数下不运行（曲线为恒等，暗角补偿未启用），未移植 | 默认不用 | §10.9 |
+| ToneCurve、ShadeCorrection | 逐位移植并接入 `decode`；本图参数下不运行（曲线恒等、暗角补偿未启用） | 默认不用 | §10.9、§10.28 |
+| Edit 滑块：对比度 / 高光 / 阴影 / 黑白位 / 色相 / 饱和度 / 锐度 / 曝光 | 设置 ID 已全部对上并接入 `decode`（§10.27） | 空间项不进配置文件 | §10.27 |
 | 整图串联 `decode(arw)` | 已完成（7008×4672 uint16）；ST 与 Edit 导出全图 8 位 MAE 0.130，整图约 41 s | — | §10.25 |
 | 输出：sRGB / AdobeRGB，8/16 位 TIFF、JPEG | 已完成；AdobeRGB 全图 8 位 MAE 0.133 | — | §10.26 |
 
@@ -274,7 +275,8 @@ LUT 构建 `FUN_1000c7120`：
 
 ### 9.4 HueSaturation（仅当 +0x204 或 +0x1fc 非零时加入管线）
 
-这是用户的色相和饱和度滑块（设置键 0x8019 / 0x8016），不使用外观数据。
+这是用户的色相和饱和度滑块（设置键 **0x8019 = Hue** → dev+0x204、**0x8016 = Saturation**
+→ dev+0x1fc；名字取自 Edit 自己的键名表 0x10029acde/0x10029acfb），不使用外观数据。
 - 色相每档旋转 0.35°（负方向）或 0.7°（正方向）。角度用 `FUN_1000e53ac` 的多项式 atan2 计算（double，含 FMA），再查运行时生成的 512 项 sin 表（`FUN_1000e56e0`：`float(sin(i·2π/512))`）。
 - 饱和度为 `1 + 0.01·s`。
 
@@ -291,7 +293,7 @@ LUT 构建 `FUN_1000c7120`：
 
 ### 9.6 默认会运行哪些阶段
 
-开发参数来自设置存储（`FUN_1000aac90`：键 0x8002 → `+0x1e8` 模式，0x8016 → `+0x1fc`，0x8019 → `+0x204`，0x8026 → `+0x248`）。默认值由另一条初始化路径写入，尚未静态确定。
+开发参数来自设置存储（`FUN_1000aac90`：键 0x8002 → `+0x1e8` 模式，0x8016（Saturation）→ `+0x1fc`，0x8019（Hue）→ `+0x204`，0x8026 → `+0x248`）。默认值由另一条初始化路径写入，尚未静态确定。
 
 从语义推断：滑块默认为 0，此时 HueSaturation 不加入管线；`+0x248`（3D LUT 开关，同时让 RGB2YCC 不再做 ±8192 限幅）的默认值需要运行时确认。
 
@@ -389,7 +391,7 @@ LUT 构建 `FUN_1000c7120`：
 | 设置 | 映射 | 当前 / 初始 | 含义 |
 | --- | --- | --- | --- |
 | 0x8026 | dev+0x248 | 0 / 0 | **3DLut 关闭**；render+0x60 = 0，ChromaSuppress 走 c2204 分支（§10.6） |
-| 0x8016 / 0x8019 | dev+0x1fc / +0x204 | 0 / 0 | **HueSaturation 关闭** |
+| 0x8016 / 0x8019 | dev+0x1fc / +0x204 | 0 / 0 | **HueSaturation 关闭**（Saturation / Hue） |
 | 0x8002 | dev+0x1e8 | 1 / 1 | RGB2YCC 模式 1（与 §8 推断一致） |
 | 0x8018 | dev+0x1f8 | 0 | 曝光补偿 0 → render+0x18ee = 64 |
 | 0x901b / 0x9017 / 0x9018 | dev+0x2bc / +0x2b0 / +0x2ac | 0 | YGamma 档位 0、偏移项 0（与渲染器一致） |
@@ -908,6 +910,14 @@ Edit 导出时会把两份显影设置快照（拍摄时 / Edit 会话）追加�
 | 0x8014 | +0x1f0 | 色调 |
 | 0x8015 | +0x1f4 | R/B 系数 |
 | 0x8018 | +0x1f8 | 曝光补偿（1/300 EV） |
+| 0x8016 / 0x8017 / 0x8019 | +0x1fc / +0x200 / +0x204 | Saturation / Contrast / Hue（§10.27） |
+| 0x801a–0x801d | +0x208…+0x214 | 锐度：ApConGain / OverShoot / UnderShoot / Threshold |
+| 0x9017 / 0x9018 | +0x2b0 / +0x2ac | WhiteLevel / BlackLevel |
+| 0x9019 / 0x901a | +0x2b4 / +0x2b8 | HighlightLevel / ShadowLevel |
+| 0x901b / 0x901d | +0x2bc / +0x2c4 | Fade / Fineness |
+| 0x9000–0x9003 / 0x9004–0x9007 | +0x10/+0x68/+0xc0/+0x118 | 曲线工具 R/G/B/Y：x / y 控制点（0..511） |
+| 0x8030 / 0x8031 / 0x8032 | +0x178 / +0x17c / +0x180 | PeripheralIllumination / CentralRadius / CentralStrength |
+| 0x900e / 0x900f | +0x280 / +0x284 | ShadeCorrection 投影开关 / 角度（0.001°） |
 | 0x801e | +0x218 | 降噪 / Marble 插入 |
 | 0x8029 | +0x224 | Marble 强度 |
 | 0x8022 | +0x238 | DRO |
@@ -932,8 +942,15 @@ Edit 快照里 0x8021 = `(0,0,0,0,-1,-1,-1,-1)`、0x9012 = 预览尺寸 `(1616,1
 
 **验证**（研究工作区的 `verify_develop_settings.py`）：保存文件 `Sony/DSC03591.ARW`
 （原始 + 1630 B）的相机/Edit 两个快照、`read_settings` 取 Edit、原始文件返回空、
-`marble_dev`、镜头 CA/畸变开关（改写块内值）以及前端默认/显式覆盖，**12/12 通过**。
-原始参考 ARW 的默认输出与改动前相同。
+`marble_dev` / `fade_dev`（含越界钳位）、镜头 CA/畸变开关（改写块内值）以及前端默认/
+显式覆盖，**21/21 通过**。原始参考 ARW 的默认输出与改动前相同。
+
+**越界值**：`FUN_1000aac90` 把 0x901c / 0x901b 原样复制到 dev+0x2c0 / +0x2bc，没有限幅
+（条目类型是 LONG；消费者按 int 读取）。开发者滑块范围（清晰度 0–100、褪色 0–9 步 =
+0–90）之外的值会让表索引越界：Marble 的强度表只有 0–109，`FUN_1000d71fc` 的增益表只有
+10 档且 `q = level / 10`。因此 `marble_dev()` / `fade_dev()` 在这两个字段上按有符号 32 位
+重新解释后钳位，`sony_marble.marble()` 与 `ygamma_offset` / `ygamma_gain_raw` 再拒绝
+负值（Rust Marble 对 0–109 之外的清晰度返回 fallback，避免 `q as usize` panic）。
 
 **未保存 ARW 的初始值**（`camera_defaults(arw)`，按 `FUN_1000a6e9c` 的汇编还原；该函数由
 Edit 在首次打开文件时调用，参数为 (上下文, 解码器, dev)）：
@@ -987,7 +1004,8 @@ RAW -> [RawNR] -> ITP(1024 分块) -> [DRO/Vatr] -> GeoCorr -> SSCS
 - 耗时（Apple Silicon）：加速前全流程约 4–5 分钟（渲染两遍，约 216 s；峰值 RSS 约 6 GB）。
   加速后 DSC03591 全流程 **41 s**：ITP 6 s、GeoCorr 8 s、渲染 28 s（SSCS 1.3、外观 6.8、
   Sharpness 3.3、Spica 6.7、Marble 5.0 s）。结果与加速前逐位一致。`pad=0` 更快但边界会退化。
-- 限制：ToneCurve、ShadeCorrection、3DLut 构建链未移植（当前文件不运行）；非 RGGB 会报错；
+- 限制：3DLut 构建链未移植（当前文件不运行）；ToneCurve/ShadeCorrection 已接入（§10.28）；
+  非 RGGB 会报错；
   非全画幅文件依赖正确的解码器矩形（已自动读取）。
 
 ### 10.26 输出色彩空间与文件格式（2026-10-17）
@@ -1007,3 +1025,105 @@ RAW -> [RawNR] -> ITP(1024 分块) -> [DRO/Vatr] -> GeoCorr -> SSCS
   配置文件运行时从本机 Edit 安装目录读取（`SONY_EDIT_RESOURCES`）。
 - 命令行：`--color-space srgb|adobe`、`--bits 8|16`、`--quality`；`.tif` 默认 16 位，
   `.jpg` / `.png` 为 8 位。
+
+### 10.27 Edit 滑块：设置 ID → 阶段（2026-10-17）
+
+`FUN_1000aac90` 是设置对象 → dev 结构的直线复制函数（0x1000aac90–0x1000ab6f0）。
+反汇编时把每个 `mov w1,#id` / `str w0,[x21,#off]` 对齐，得到完整映射；参数名取自
+Edit 自己的键名表（`GfDocument` 加载路径 0x1001f52c0–0x1001f5d60，字符串在
+0x10029acac 起：Saturation、Contrast、Exposure、Hue、…、BlackLevel、WhiteLevel、
+ShadowLevel、HighlightLevel、Fade、Clarity、Fineness）。
+
+| 设置 | dev | 名称 | 消费者 |
+| --- | --- | --- | --- |
+| 0x8016 | +0x1fc | **Saturation** | HueSaturation：`s = 1 + 0.01·v` |
+| 0x8017 | +0x200 | **Contrast** | MainGamma 二级曲线族（机型代号 ≥ 2 时取此值） |
+| 0x8018 | +0x1f8 | **Exposure** | WB 增益 `exp2(EV/300)` + ChromaSuppress `render+0x18ee` |
+| 0x8019 | +0x204 | **Hue** | HueSaturation：每档 0.35°（负）/ 0.7°（正） |
+| 0x801a–0x801d | +0x208/+0x20c/+0x210/+0x214 | ApConGain / OverShoot / UnderShoot / Threshold | Sharpness |
+| 0x9017 | +0x2b0 | **WhiteLevel** | YGamma 逐像素分母 `512 − dev2b0 − q` |
+| 0x9018 | +0x2ac | **BlackLevel** | YGamma 逐像素拐点 `s2 = −(dev2ac>>2)·63.998` |
+| 0x9019 | +0x2b4 | **HighlightLevel** | MainGamma 二级曲线族上半段 |
+| 0x901a | +0x2b8 | **ShadowLevel** | MainGamma 二级曲线族下半段 |
+| 0x901b | +0x2bc | Fade | YGamma 档位（0–90，§9.1） |
+| 0x901c | +0x2c0 | Clarity | Marble 强度 |
+| 0x901d | +0x2c4 | Fineness | Sharpness（`sharpness_params(dev2c4)`） |
+
+关键调用点：
+
+- **MainGamma 二级曲线**：0x1000d32d0 选参数，`w3 = dev+0x200`（对比度）、
+  `w4 = dev+0x2b4`（高光）、`w5 = dev+0x2b8`（阴影），再调 `0x10011e174`。
+  该函数的下半段（0–471）用 `18 + 0.2·(contrast − shadow)`，上半段（471–1024）用
+  `18 + 0.2·(contrast + highlight)`；高光把上半段推向更亮的曲线，阴影把下半段推向
+  更亮的曲线。`sony_look.contrast_table` 已验证逐位一致。
+- **HueSaturation**：任务 0x1000e5840，`+0x204` 是色相（整数），`+0x1fc` 是饱和度
+  （整数；`ldr s0` 只是 32 位加载，随后 `sshll/scvtf` 按有符号整数转 double）。
+  管线位置在 YGamma 之后、YNR/Spica 之前（§1）。
+- **YGamma**：逐像素函数 0x1000feb68 读 `ldrsh [dev+0x2ac]` 和 `[dev+0x2b0]`
+  （§9.2 的 `s2/q`）。
+- **ToneCurve（0x9000–0x9007）不是这些滑块**：它们是曲线工具的 4 条曲线
+  （x 数组 0x9000+k、y 数组 0x9004+k，默认 `[0, 511]` 恒等），只在 ToneCurve 阶段
+  使用；该阶段现已移植并接入（§10.28），本批文件默认不运行。
+
+接线（`sony_decode.decode`）：`effective_settings` 里的这些键直接传给
+`sony_render.Look(contrast, highlight, shadow, hue, saturation, exposure,
+white_level, black_level)`；锐度额外传 `dev2c4 = 0x901d`（默认 50）。
+Spica 的强度 `k2·0.0002·(dev208+100)·(100−dev2c4)` 同样读 ApConGain（0x801a）和
+Fineness（0x901d）：两者经 `detail["dev208"/"dev2c4"]` 同时传给 Sharpness 和 Spica
+（NumPy 与 Rust 两条路径）。之前 Spica 一直用默认 0 / 50。模拟器对照
+`verify_detail_sliders.py`：9 组滑块 × Sharpness/Spica × 4 种输入，72/72 逐位一致，
+非默认的 8 组都会改变 Spica 输出。所有参数默认 0
+时，`Look` 的输出与接线前 **逐位相同**（二级曲线在 (0,0,0) 时等于第 18 条恒等曲线，
+已验证生成的 MainGamma LUT 一致）。
+
+HueSaturation 的全图像素循环改成 `sony_ycc_stages.hue_saturation_vec`：按行分块
+（默认 256 行）向量化，分支和常数与标量版相同；乘加未融合的舍入差异只在截断边界
+可能改变结果，因此这些像素会回退到标量 `approx_atan2` 重算。与标量版在随机、
+渐变、纯色和边界输入上逐位一致（`hue_saturation_vec` 的 chunk 参数用于测试分块）。
+未保存的 ARW 这些滑块都是 0，`camera_defaults` 只额外补了 Fineness = 50。
+
+### 10.28 ToneCurve 与 ShadeCorrection（2026-10-17）
+
+**ToneCurve（曲线工具，Y/R/G/B）**：`sonylook/sony_tonecurve.py`。
+
+- 设置 **0x9000+k**（x）和 **0x9004+k**（y）是第 k 条曲线的控制点，0..511 对应
+  0..1。曲线对象在 dev+0x10、+0x68、+0xc0、+0x118，处理函数 0x1000fae94 依次
+  用于 **R、G、B、Y**（不是 UI 列表的 Y/R/G/B 顺序）。
+- 控制点构造（`FUN_1000aac90` 内）：先放入默认的 (0,0)、(1,1)；x=0 的点写入
+  第一个点，x=511 的点写入最后一个点，其余按 x 排序插入；最后删除设置里没有
+  显式给出的默认端点。
+- `FUN_1000c3a0c` 把相邻控制点转换成三次 Bézier 段：每段插入两个控制柄，
+  切线为
+  `v = (next-cur)·(li/lo) - (prev-cur)·(lo/li)`，
+  `A = −(li/3)·v/|v|`（入射，限制到 |Δx_in|），
+  `B = +(lo/3)·v/|v|`（出射，限制到 |Δx_out|）。端点控制柄为 0。
+- `FUN_1000c4b80` 以 u=1/32..1（每段 32 个采样）求 Bézier，并把 x 区间
+  线性填进 **65536 项 uint16 LUT**（值 = y·65535）。
+- 处理：`Y=(R·0x991+G·0x12c9+B·0x3a6)>>11`（= 4×亮度），查 Y 曲线；再用
+  `C1/C2` 重建 R/G/B，分别查 R/G/B 曲线，输出 `(v>>2)&0x3fff`。任一条曲线
+  非恒等时整个阶段才插入。
+- 验证：`verify_tonecurve_shade.py`，曲线 LUT 8 组、处理 2 组，全部逐位一致。
+
+**ShadeCorrection（周辺光量）**：`sonylook/sony_shade.py`。
+
+- 系数表 `FUN_1000c4ee8`：设置 0x8030 = PeripheralIllumination（默认 80）、
+  0x8031 = CentralRadius、0x8032 = CentralStrength，在 dev+0x170 的 +0x18
+  生成 11 个径向增益（0.1 半径一档）。前段 `cos(radius·0.0007853982·i)^4`，
+  后段用 `strength` 与中心值混合平滑。
+- 增益 `FUN_1000c5410`：以图像中心（宽高的一半）算归一化半径 r，
+  `i=trunc(10r)`，在系数表上线性插值；r≥1 取最后一个系数。
+- 处理 0x1000eec2c：对每个像素 `Y=(R·0x991+G·0x12c9+B·0x3a6)>>11`，
+  `Y'=trunc(Y/gain)` 并限幅 0..65535，再用与 ToneCurve 相同的 C1/C2 公式
+  重建，右移 15 位、限幅 0..0x3fff。gain == 1 的像素**原样保留**。
+- 中心尺寸：render+0x18 模式 2 用区域宽高，模式 3 用图像宽高的一半，其余用
+  图像宽高；像素坐标再加上描述符 +0x18/+0x1c 的偏移。设置 0x900e == 1 时，
+  `FUN_1000aedb8` 还会按 0x900f（0.001° 单位）和图像矩形做一次投影缩放。
+  本实现按整图、模式 0（= 图像宽高）接入 decode。
+- 管线插入条件是 dev+0x17c 或 dev+0x180 非零，即 CentralRadius 或
+  CentralStrength 非零；`PeripheralIllumination` 单独变化不会插入阶段。
+- 验证：`verify_tonecurve_shade.py`，系数 5 组、投影缩放 6 组、处理 3 组，
+  全部逐位一致（gain 与 0x1000c5410 逐像素一致）。
+
+接入位置：`sony_render.Look.finish` 在 Marble、Effect 之后依次运行
+ToneCurve、ShadeCorrection；默认参数（恒等曲线、radius/strength = 0）不构建
+阶段，输出与接线前逐位相同。

@@ -214,8 +214,18 @@ def _default_pairs():
     return struct.unpack("<20H", _read_va(DEFAULT_PAIRS, 40))
 
 
+def _check_level(level):
+    """Fade level (dev+0x2bc): the slider gives 0..90.  FUN_1000d71fc uses q = level / 10
+    (sdiv) as an index, so a negative level would read before the 10-entry table; that is
+    refused here and in develop_settings.fade_dev().  Every level >= 0 is deterministic in
+    Edit (between steps it interpolates, above 90 q = 8 extrapolates) and is supported."""
+    if level < 0:
+        raise ValueError(f"YGamma level {level} < 0: the gain table is indexed from 0..90")
+
+
 def ygamma_offset(look_has_780e, tbl_780b, level):
     """FUN_1000d70e0 -> int (stored as int16 at render+0x91962)."""
+    _check_level(level)
     lv = level & 0xffffffff
     if look_has_780e:
         if level == 0:
@@ -241,6 +251,7 @@ def ygamma_offset(look_has_780e, tbl_780b, level):
 
 def ygamma_gain_raw(look_has_780e, tbl_780e, level):
     """FUN_1000d71fc -> uint16; gain = value / 16384."""
+    _check_level(level)
     lv = i32(level)
     q = 8 if lv > 0x59 else sdiv(lv, 10)
     frac = F(F(i32(lv - q * 10)) * F(0.1))
@@ -426,6 +437,141 @@ def hue_saturation(cr, cb, hue, sat, sin_tab=None):
             d20 = r * sin_tab[(au + 0x80) & 0x1ff]
         o1[idx] = fcvtzs(s * d18 + 32768.0) & 0xffff
         o2[idx] = fcvtzs(s * d20 + 32768.0) & 0xffff
+    return o1, o2
+
+
+def _dconst64(bits):
+    return struct.unpack("<d", struct.pack("<Q", bits))[0]
+
+
+_AT_K1 = _dconst64(0x3fb0f9096bb98c7e)
+_AT_K2 = _dconst64(0x3fcf525460aa64c3)
+_AT_Q = _dconst64(0x3fe921fb60000000)
+_AT_H = _dconst64(0x3ff921fb60000000)
+_AT_PI = _dconst64(0x400921fb60000000)
+_AT_TINY = _dconst64(0x3ddb7cdfe0000000)
+
+
+def _approx_atan2_vec(x, y):
+    """Vectorised approx_atan2: same branches and float64 constants.
+
+    Products and adds are rounded separately instead of fused, which can differ
+    from the scalar port by ~1 ulp.  hue_saturation_vec re-runs the exact scalar
+    code for the few pixels where that could change a truncation.
+    """
+    k1, k2, q, h, pi = _AT_K1, _AT_K2, _AT_Q, _AT_H, _AT_PI
+    x = x + _AT_TINY
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = y / x
+        r2 = x / y
+
+    # Expand the three fma layers: fma(fma(fma(a,k1,k2), a-1, c), r, add)
+    def near_(rr, add):
+        a_ = np.abs(rr)
+        return ((a_ * k1 + k2) * (a_ - 1.0) + (-q)) * rr + add
+
+    def far_(rr, add):
+        a_ = np.abs(rr)
+        return ((a_ * -k1 + -k2) * (a_ - 1.0) + q) * rr + add
+
+    def mid_(rr):
+        b_ = np.abs(rr)
+        return rr * q + ((rr - b_ * rr) * (b_ * k1 + k2))
+
+    xneg, yneg = x < 0, y < 0
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        d5 = np.where(-x >= y, near_(r, -h), mid_(r2))
+        d1 = np.where(x >= y, near_(r, h), mid_(r2))
+        pos = np.where(xneg, d5, d1)
+        neg_xneg = np.where(x <= y, near_(r, -h), far_(r2, -pi))
+        neg_xpos = np.where(x >= -y, near_(r, h), far_(r2, pi))
+    return np.where(yneg, np.where(xneg, neg_xneg, neg_xpos), pos)
+
+
+def _i32_vec(v):
+    v = np.asarray(v, np.int64) & 0xFFFFFFFF
+    return np.where(v >= (1 << 31), v - (1 << 32), v)
+
+
+def _trunc32(x):
+    """fcvtzs on an array: truncate toward zero, NaN -> 0."""
+    x = np.where(np.isnan(x), 0.0, x)
+    x = np.clip(x, -2147483648.0, 2147483647.0)
+    return np.trunc(x).astype(np.int64)
+
+
+def hue_saturation_vec(cr, cb, hue, sat, sin_tab=None, chunk=256):
+    """Vectorised 0x1000e5840: same arithmetic as hue_saturation for whole planes.
+
+    Processes at most `chunk` rows at a time to keep the float64 temporaries
+    small.  A pixel whose truncation is close enough that the non-fused
+    multiplies could change the result is recomputed with the scalar code.
+    """
+    sin = np.asarray(sin_table() if sin_tab is None else sin_tab, np.float64)
+    if hue < 0:
+        dh = float(hue) * 0.35
+    elif hue == 0:
+        dh = 0.0
+    else:
+        dh = float(hue) * 0.7
+    s = float(sat) * 0.01 + 1.0
+    rad = dh * 0.017453292519943302
+    cr = np.asarray(cr, np.int64)
+    cb = np.asarray(cb, np.int64)
+    o1 = np.empty(cr.shape, np.uint16)
+    o2 = np.empty(cr.shape, np.uint16)
+    rows = cr.shape[0]
+    for y0 in range(0, rows, chunk):
+        y1 = min(y0 + chunk, rows)
+        a = cr[y0:y1] - 0x8000
+        b = cb[y0:y1] - 0x8000
+        if rad == 0.0:
+            f1 = s * a.astype(np.float64) + 32768.0
+            f2 = s * b.astype(np.float64) + 32768.0
+            o1[y0:y1] = (_trunc32(f1) & 0xFFFF).astype(np.uint16)
+            o2[y0:y1] = (_trunc32(f2) & 0xFFFF).astype(np.uint16)
+            continue
+        with np.errstate(invalid="ignore"):
+            r = np.sqrt(_i32_vec(a * a + b * b).astype(np.float64))
+        ang = _approx_atan2_vec(a.astype(np.float64), b.astype(np.float64))
+        f17 = (ang + rad) * 81.4873285954589
+        u = _trunc32(np.where(f17 >= 0.0, 0.5, -0.5) + f17)
+        pos = u >= 0
+        u1 = np.where(pos, u & 0x1FF, 0x200 - ((-u) & 0x1FF))
+        d18 = np.where(u1 < 512, r * sin[u1 & 0x3FF], 0.0)
+        au = np.abs(u)
+        d20 = r * sin[(au + 0x80) & 0x1FF]
+        f1 = s * d18 + 32768.0
+        f2 = s * d20 + 32768.0
+        q1 = _trunc32(f1) & 0xFFFF
+        q2 = _trunc32(f2) & 0xFFFF
+        # Cells close to a truncation boundary: redo them with the exact scalar path.
+        risky = ((np.abs(f17 - np.trunc(f17)) < 1e-6) | (np.abs(f17 - np.ceil(f17)) < 1e-6)
+                 | (np.abs(f1 - np.round(f1)) < 1e-6) | (np.abs(f2 - np.round(f2)) < 1e-6))
+        if risky.any():
+            idx = np.flatnonzero(risky.reshape(-1))
+            if idx.size <= 50000:
+                ar = a.reshape(-1)
+                br = b.reshape(-1)
+                rr = r.reshape(-1)
+                qq1, qq2 = q1.reshape(-1), q2.reshape(-1)
+                for k in idx:
+                    ak, bk = int(ar[k]), int(br[k])
+                    rk = rr[k]
+                    if math.isnan(rk):
+                        rk = 0.0
+                    # exact double atan2 for this pixel, then the same float32 steps
+                    f = F((approx_atan2(float(ak), float(bk)) + rad) * 81.4873285954589)
+                    uu = fcvtzs(F((0.5 if f >= 0.0 else -0.5) + f))
+                    i1 = (uu & 0x1FF) if uu >= 0 else 0x200 - ((-uu) & 0x1FF)
+                    d1_ = rk * sin[i1 & 0x3FF] if i1 < 512 else 0.0
+                    auu = -uu if uu < 0 else uu
+                    d2_ = rk * sin[(auu + 0x80) & 0x1FF]
+                    qq1[k] = fcvtzs(s * d1_ + 32768.0) & 0xFFFF
+                    qq2[k] = fcvtzs(s * d2_ + 32768.0) & 0xFFFF
+                q1, q2 = qq1.reshape(q1.shape), qq2.reshape(q2.shape)
+        o1[y0:y1] = q1.astype(np.uint16)
+        o2[y0:y1] = q2.astype(np.uint16)
     return o1, o2
 
 
