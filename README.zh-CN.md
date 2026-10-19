@@ -43,10 +43,11 @@
 需要 PhotoLab **Elite**（用到 *LUT Grading* 面板），在 macOS 的 PhotoLab 10.1 上测试过。PhotoLab 按路径引用 DCP 和 LUT 文件，所以要把它们放在一个不会删的文件夹里。
 
 1. 把 `profiles/dxo/SonyA7M5 Linear Base v2.dcp` 和 `profiles/dxo/SonyA7M5 Look *.cube` 复制到这个文件夹。
-2. 先套用 **6 - 无校正** 预设，或者确认 Smart Lighting、ClearView、对比度和各项镜头校正都已关闭。
+2. 先套用 **6 - 无校正** 预设，或者确认 Smart Lighting、ClearView、对比度都已关闭。镜头校正（畸变、色差、镜头锐度）可以再打开，它们不影响外观的颜色。
 3. **颜色渲染**（Color/B&W Rendering）：类型选 **DCP 配置文件** → *导入 DCP 配置文件…* → `SonyA7M5 Linear Base v2.dcp`；**DCP 曲线选 Adobe**，强度 100，**饱和色保护设为 0**（关掉自动）。
 4. **LUT（查找表）**（DxO PL Elite – LUT Grading）：LUT 文件 → *导入（.cube）…* → `SonyA7M5 Look XX.cube`；**LUT 色彩空间选 ProPhoto RGB**，强度 100。
 5. 可以把这套设置存成预设，换外观时只换 `.cube`。
+6. 想和 Sony 原片完全一致的话，**暗角**校正保持关闭。Edit 不补偿暗角，打开后四角会偏亮，和 Camera Raw 的情况一样。
 
 ### 适用范围
 

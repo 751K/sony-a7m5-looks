@@ -48,10 +48,11 @@ On Windows the folders are `%APPDATA%\Adobe\CameraRaw\CameraProfiles` and `%APPD
 Needs PhotoLab **Elite** (the *LUT Grading* palette); tested with PhotoLab 10.1 on macOS. PhotoLab refers to the DCP and LUT files by path, so put them in a folder you keep.
 
 1. Copy `profiles/dxo/SonyA7M5 Linear Base v2.dcp` and `profiles/dxo/SonyA7M5 Look *.cube` to that folder.
-2. Start from the **6 – No correction** preset, or make sure Smart Lighting, ClearView, Contrast and the lens corrections are off.
+2. Start from the **6 – No correction** preset, or make sure Smart Lighting, ClearView and Contrast are off. Lens corrections (distortion, chromatic aberration, lens sharpness) can be switched back on; they do not change the look's colour.
 3. *Color/B&W Rendering*: Type **DCP Profile** → *Import DCP Profile…* → `SonyA7M5 Linear Base v2.dcp`. Set **DCP Curve to Adobe**, Intensity 100, and **Protect Saturated Colors to 0** (switch off its automatic mode).
 4. *DxO PL Elite – LUT Grading*: LUT file → *Import (.cube)…* → `SonyA7M5 Look XX.cube`; **LUT Color Space ProPhoto RGB**, Intensity 100.
 5. Optionally save these settings as a preset; switch looks by choosing another `.cube`.
+6. To match Sony's rendering exactly, leave *Vignetting* off. Edit does not correct vignetting, so with it on the corners come out brighter, as in Camera Raw.
 
 ### Scope
 
