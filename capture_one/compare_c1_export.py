@@ -27,7 +27,7 @@ def to_srgb(a, icc_desc):
     if "Adobe RGB" in icc_desc:
         lin = np.clip((a ** (563 / 256)) @ (np.linalg.inv(SRGB) @ A98).T, 0, 1)
         return np.where(lin <= 0.0031308, 12.92 * lin, 1.055 * lin ** (1 / 2.4) - 0.055)
-    if "ProPhoto" in icc_desc:                     # Camera Raw exports (D50, gamma 1.8)
+    if "ProPhoto" in icc_desc or "ROMM" in icc_desc:   # Camera Raw / DxO exports (D50, gamma 1.8)
         import c1_look_profile as C
         pp = np.array([[0.7976749, 0.1351917, 0.0313534], [0.2880402, 0.7118741, 0.0000857], [0.0, 0.0, 0.8252100]])
         m = np.linalg.inv(np.linalg.inv(pp) @ C.CHAD @ C.M_SRGB)

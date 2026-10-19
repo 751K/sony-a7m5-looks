@@ -13,3 +13,12 @@ render_output/
 chart/measure_*.json
 chart/*.npy
 rust/sonylook_core/target/
+# DxO PhotoLab sidecars and research files
+*.dop
+chart/probe/
+profiles/dxo/SonyA7M5 Probe*.cube
+profiles/dxo/SonyA7M5 Linear Base.dcp
+profiles/dxo/SonyA7M5 Linear Base v3.dcp
+profiles/dxo/SonyA7M5 Test*.dcp
+profiles/dxo/e_a7m5_*
+dxo/body/

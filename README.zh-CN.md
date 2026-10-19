@@ -1,10 +1,10 @@
-# Sony A7M5 创意外观 → Capture One / Camera Raw
+# Sony A7M5 创意外观 → Capture One / Camera Raw / DxO PhotoLab
 
 [English](README.md) | 中文
 
 天下苦创意风格久矣，CameraRaw 内迟迟没有上线A7M5的创意风格文件
 
-本仓库通过逆向Sony Image Edit，把 Sony α7 V（ILCE-7M5）的 12 种 Creative Look移植成 Capture One 和 Camera Raw / Lightroom 的配置，并通过对比检验，色度上基本没有差异。
+本仓库通过逆向Sony Image Edit，把 Sony α7 V（ILCE-7M5）的 12 种 Creative Look移植成 Capture One、Camera Raw / Lightroom 和 DxO PhotoLab 的配置，并通过对比检验，色度上基本没有差异。
 
 ![Edit / Capture One / Camera Raw 对照](images/compare_ST.jpg)
 
@@ -22,6 +22,7 @@
 - 剩下的差异集中在边缘和细纹理，来自各软件自己的去马赛克和锐化，不属于颜色风格。
 - 合成色卡上，配置与 Sony 外观目标的差异：C1 为 0.10–0.15，ACR（64³）为 0.14。
 - 亮而饱和的颜色（v1.1.0）：配置文件现在包含 Sony 的 SSCS，它会把亮而饱和的颜色向亮度收拢。在 DSC03591 受它影响的约 5% 画面上，ST 与 Edit 的色度误差在 C1 中从 0.64 降到 0.16，在 ACR 中从 0.61 降到 0.33。
+- DxO PhotoLab（v1.2.0）：用 PhotoLab 10.1 导出 DSC03591 的 ST（底座 DCP + 外观 LUT，拍摄时白平衡），和同一白平衡下的外观链渲染相比误差为 1.18，各通道整体偏差 0.25–0.67。还没有和 Edit 的导出图对照过。过曝前约 1.7 档以下，PhotoLab 线性地把颜色送进 LUT（色卡误差 0.11）；再往上由它自己的高光处理接管，那里的彩色色块平均差 4.6，最大 26。
 - 覆盖范围：只有 ST、FL2、FL3 有 Edit 导出图可以对照。其余 9 种外观走同一套已验证的代码，只是数据不同，但没有和 Sony 的成片核对过。上表 FL2/FL3 的数字是在褪色为 0 时测的，Edit 渲染这两种外观时用的就是 0。从 v1.0.2 起，配置文件按相机默认的褪色生成（FL2/FL3 为 1，IN 为 3，SH 为 6；Edit 漏了 FL2/FL3 的这个默认值）。这一改动还没有和相机直出 JPEG 对照过。
 
 ## 安装使用
@@ -36,6 +37,16 @@
 1. 把 `profiles/camera_raw/SonyA7M5 Linear Base.dcp` 复制到 `~/Library/Application Support/Adobe/CameraRaw/CameraProfiles/`。
 2. 把 `profiles/camera_raw/SonyA7M5 Look *.xmp` 复制到 `~/Library/Application Support/Adobe/CameraRaw/Settings/`。
 3. 重启 Photoshop / Lightroom，在配置文件浏览器的 **Sony A7M5** 组里选择外观。
+
+### DxO PhotoLab
+
+需要 PhotoLab **Elite**（用到 *LUT Grading* 面板），在 macOS 的 PhotoLab 10.1 上测试过。PhotoLab 按路径引用 DCP 和 LUT 文件，所以要把它们放在一个不会删的文件夹里。
+
+1. 把 `profiles/dxo/SonyA7M5 Linear Base v2.dcp` 和 `profiles/dxo/SonyA7M5 Look *.cube` 复制到这个文件夹。
+2. 先套用 **6 - 无校正** 预设，或者确认 Smart Lighting、ClearView、对比度和各项镜头校正都已关闭。
+3. **颜色渲染**（Color/B&W Rendering）：类型选 **DCP 配置文件** → *导入 DCP 配置文件…* → `SonyA7M5 Linear Base v2.dcp`；**DCP 曲线选 Adobe**，强度 100，**饱和色保护设为 0**（关掉自动）。
+4. **LUT（查找表）**（DxO PL Elite – LUT Grading）：LUT 文件 → *导入（.cube）…* → `SonyA7M5 Look XX.cube`；**LUT 色彩空间选 ProPhoto RGB**，强度 100。
+5. 可以把这套设置存成预设，换外观时只换 `.cube`。
 
 ### 适用范围
 
@@ -87,6 +98,7 @@ Sony 创意外观可以视为一个从**白平衡后的相机原生 RGB** 到**�
 
 - Capture One 版本：输入 ICC 配置的 A2B0 表，65³ 网格，配合平方根形状曲线，以提高暗部的采样密度。
 - Camera Raw 版本：XMP 配置中的 RGBTable，64³ 网格。
+- DxO PhotoLab 版本：64³ 的 `.cube` LUT，按 ProPhoto RGB（γ1.8）读取。
 
 在测试照片上，插值误差约为 0.2–0.5（8 位单位）。
 
@@ -107,12 +119,20 @@ Sony 创意外观可以视为一个从**白平衡后的相机原生 RGB** 到**�
 | 配置之后的处理   | 无（平方探针误差 0.04，亮度探针误差 0.02）              | 无（RGBTable 为最后一步）                       |
 | 模型在色卡上的残差 | 约 0.2                                   | 平均 0.04，最大 0.37                         |
 
+DxO PhotoLab（底座 DCP `SonyA7M5 Linear Base v2`，DCP 曲线 = Adobe，LUT 在 ProPhoto RGB 中）：
+
+- **中间调**：LUT 收到的是白平衡后的相机 RGB 乘以底座 DCP 的矩阵，线性，Sony 线性值 6422 对应 1.0（和 Camera Raw 的刻度相同）。
+- **高光**：从过曝前约 1.7 档起，PhotoLab 的高光恢复会压缩较亮的通道，之后还有一段来源未定位的压缩；这部分用灰阶上实测的曲线建模。
+- **高饱和色**：PhotoLab 在 DxO Wide Gamut 工作空间里把负分量裁成 0，所以很饱和的绿色、蓝色里较弱的通道会被抬起。
+- **LUT 之后**：没有处理（灰阶上平方探针吻合到 0.03，亮度探针 0.33）。
+- **模型在色卡上的残差**：高光门槛以下 0.11，以上 4.6（全部在彩色色块）。
+
 两点补充：
 
 - Capture One 的 *E* 依赖所选影调曲线，配置只在 Linear Response 下有效。
 - Camera Raw 的底座 DCP 将 ForwardMatrix 设为线性 ProPhoto → XYZ D50，影调曲线设为恒等，使 Camera Raw 的工作空间与白平衡后的相机 RGB 一致，避免叠加 Adobe 自身的色彩和影调。
 
-处理管线的最终结论见 [docs/pipeline.md](docs/pipeline.md)（推导过程在它的 git 历史里），两家宿主软件的标定见 [docs/capture_one.md](docs/capture_one.md)、[docs/camera_raw.md](docs/camera_raw.md)。
+处理管线的最终结论见 [docs/pipeline.md](docs/pipeline.md)（推导过程在它的 git 历史里），各宿主软件的标定见 [docs/capture_one.md](docs/capture_one.md)、[docs/camera_raw.md](docs/camera_raw.md)、[docs/dxo.md](docs/dxo.md)。
 
 ## 重新生成
 
@@ -129,10 +149,14 @@ python3 camera_raw/acr_look.py /path/to/A7M5.ARW --write
 ```
 
 ```bash
+python3 dxo/dxo_look.py /path/to/A7M5.ARW --write
+```
+
+```bash
 python3 sonylook/sony_render.py /path/to/A7M5.ARW Standard FL2 --scale 4
 ```
 
-- 第一条生成 C1 配置，第二条生成 ACR 配置，第三条用外观链直接渲染预览。
+- 第一条生成 C1 配置，第二条生成 ACR 配置，第三条生成 DxO 的 LUT（加 `--eval` 会打印在该 ARW 上的插值误差），第四条用外观链直接渲染预览。
 - 用 DSC03591 重新生成的结果，与 `profiles/` 里的文件逐字节相同。
 
 ### 解码 ARW
@@ -160,25 +184,31 @@ python3 sonylook/sony_decode.py /path/to/A7M5.ARW --out out.tif
 3. **Camera Raw**：
    - 运行 `acr_profiles.py probes`，安装生成的探针配置；
    - 用 Probe 导出色卡（16 位 ProPhoto，关闭镜头校正），运行 `measure_acr_chart.py` 测量，再运行 `acr_encoding.py` 拟合。
-4. 照片对比：`compare_c1_export.py` / `compare_acr_export.py EXPORT.tif EDIT.tif`；拼对照图用 `compare_figure.py`。
+4. **DxO PhotoLab**：
+   - 运行 `dxo/dxo_profiles.py probes` 生成探针 LUT，`dxo/dxo_profiles.py base2` 生成底座 DCP；
+   - 用 Probe 导出色卡（16 位 TIFF、ProPhoto RGB、不勾 Preserve color details），运行 `measure_acr_chart.py` 测量；
+   - 用测量结果检验 `dxo/dxo_model.py` 里的模型。
+5. 照片对比：`compare_c1_export.py` / `compare_acr_export.py EXPORT.tif EDIT.tif`；拼对照图用 `compare_figure.py`。
 
 ## 目录
 
 | 目录             | 内容                                                                          |
 | -------------- | --------------------------------------------------------------------------- |
-| `profiles/`    | 生成好的配置：C1 的 ICC，ACR 的 DCP 和 XMP                                             |
+| `profiles/`    | 生成好的配置：C1 的 ICC，ACR 的 DCP 和 XMP，DxO 的 DCP 和 `.cube`                          |
 | `chart/`       | 合成色卡：`SonyChart.ARW`（可直接用 C1 / ACR 打开）、色块定义 `SonyChart.json`、预览图            |
 | `sonylook/`    | Sony 外观链与前端的 Python 移植，以及 ARW / Edit 读取器。另含 RawNR、DRO、锐化 / Spica、Marble、镜头几何校正（都不用于配置）、BW/SE 的 Effect 阶段（用于配置），以及整图解码器 `sony_decode.py` |
 | `rust/`        | 可选的 Rust 内核（`sonylook_core`）：融合渲染 band、GeoCorr、ITP、Marble、SSCS 和表构造。见 `rust/README.md` |
 | `capture_one/` | C1 配置生成、合成色卡、测量与对比                                                          |
 | `camera_raw/`  | ACR 表格式、DCP 读写、配置生成、测量与对比                                                   |
-| `docs/`        | 研究记录：处理链细节、C1 和 ACR 的标定过程。文中提到的证据文件、测试导出不在本仓库                               |
+| `dxo/`         | DxO PhotoLab 的 LUT 输入模型（`dxo_model.py`）、探针和底座 DCP 生成、LUT 生成                      |
+| `docs/`        | 研究记录：处理链细节、C1、ACR 和 DxO 的标定过程。文中提到的证据文件、测试导出不在本仓库                               |
 
 ## 说明
 
-- 本项目与 Sony、Capture One、Adobe 均无关联，相关名称和商标归各自所有者所有。
+- 本项目与 Sony、Capture One、Adobe、DxO 均无关联，相关名称和商标归各自所有者所有。
 - 本项目通过分析软件行为来实现互操作。仓库不包含这些软件的二进制、反编译代码或从中提取的数据；需要的常量都在使用者本机从其自己安装的软件中读取。
-- 配置文件中的 ColorMatrix 数值取自 Adobe Standard 的 A7M5 配置，用于让 ACR 的白平衡行为保持不变。
+- 配置文件中的 ColorMatrix 数值取自 Adobe Standard 的 A7M5 配置，用于让 ACR 的白平衡行为保持不变。DxO 的底座 DCP 出于同样的原因，用了 Adobe Standard 的 ColorMatrix 和 D65 ForwardMatrix。
+- `dxo/dxo_model.py` 按观测到的行为重新实现了 PhotoLab 的高光恢复，并包含几个在 PhotoLab 运行时测得的数值（DxO Wide Gamut 矩阵、高光白点）；不包含 DxO 的代码或文件。
 
 ## 许可
 

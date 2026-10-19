@@ -1,8 +1,8 @@
-# Sony A7M5 Creative Looks → Capture One / Camera Raw
+# Sony A7M5 Creative Looks → Capture One / Camera Raw / DxO PhotoLab
 
 English | [中文](README.zh-CN.md)
 
-Camera Raw still has no profiles for the A7M5's Creative Looks. This repository ports all 12 Creative Looks of the Sony α7 V (ILCE-7M5) to Capture One and Adobe Camera Raw / Lightroom, based on a reverse-engineered model of Sony Imaging Edge Edit — ST, VV, NT, PT, FL, VV2, IN, SH, BW, SE, FL2 and FL3.
+Camera Raw still has no profiles for the A7M5's Creative Looks. This repository ports all 12 Creative Looks of the Sony α7 V (ILCE-7M5) to Capture One, Adobe Camera Raw / Lightroom and DxO PhotoLab, based on a reverse-engineered model of Sony Imaging Edge Edit — ST, VV, NT, PT, FL, VV2, IN, SH, BW, SE, FL2 and FL3.
 
 The profiles reproduce the look's colour and tone. Compared with Edit, the remaining chroma difference is below what the eye can see.
 
@@ -23,6 +23,7 @@ Each profile was rendered from the same ARW and compared with Edit's export of t
 - **Edges and fine texture:** the remaining differences are here. They come from each program's own demosaicing and sharpening, not from the look.
 - **Synthetic chart:** profile vs. Sony look target is 0.10–0.15 for Capture One and 0.14 for Camera Raw (64³ table).
 - **Bright, saturated colours (v1.1.0):** the profiles now include Sony's SSCS stage, which pulls bright, saturated colours towards their luma. On the ~5% of DSC03591 that it touches, ST's colour error against Edit drops from 0.64 to 0.16 in Capture One and from 0.61 to 0.33 in Camera Raw.
+- **DxO PhotoLab (v1.2.0):** an ST export of DSC03591 from PhotoLab 10.1 (base DCP + look LUT, as-shot white balance) matches the look chain rendered with the same white balance to 1.18, with a mean colour shift of 0.25–0.67 per channel. It has not yet been compared with an Edit export. Up to about 1.7 stops below clipping PhotoLab passes colours through linearly (chart error 0.11); above that its own highlight handling takes over, and colour patches there differ by 4.6 on average (26 at most).
 - **Coverage:** only ST, FL2 and FL3 have Edit exports to compare against; the other nine looks run through the same verified code with their own data but have not been checked against a Sony rendering. The FL2/FL3 numbers above are for Fade 0, which is what Edit uses for them. Since v1.0.2 the profiles apply the camera's default Fade (FL2/FL3 = 1, IN = 3, SH = 6), which Edit omits for FL2/FL3. That change has not yet been checked against in-camera JPEGs.
 
 ## Installation
@@ -41,6 +42,16 @@ Each profile was rendered from the same ARW and compared with Edit's export of t
 4. To match Sony's rendering exactly, turn off *Use Profile Corrections*. Adobe's lens profile also corrects vignetting, which Edit does not, so with it on the corners come out 20–27% brighter.
 
 On Windows the folders are `%APPDATA%\Adobe\CameraRaw\CameraProfiles` and `%APPDATA%\Adobe\CameraRaw\Settings` (untested).
+
+### DxO PhotoLab
+
+Needs PhotoLab **Elite** (the *LUT Grading* palette); tested with PhotoLab 10.1 on macOS. PhotoLab refers to the DCP and LUT files by path, so put them in a folder you keep.
+
+1. Copy `profiles/dxo/SonyA7M5 Linear Base v2.dcp` and `profiles/dxo/SonyA7M5 Look *.cube` to that folder.
+2. Start from the **6 – No correction** preset, or make sure Smart Lighting, ClearView, Contrast and the lens corrections are off.
+3. *Color/B&W Rendering*: Type **DCP Profile** → *Import DCP Profile…* → `SonyA7M5 Linear Base v2.dcp`. Set **DCP Curve to Adobe**, Intensity 100, and **Protect Saturated Colors to 0** (switch off its automatic mode).
+4. *DxO PL Elite – LUT Grading*: LUT file → *Import (.cube)…* → `SonyA7M5 Look XX.cube`; **LUT Color Space ProPhoto RGB**, Intensity 100.
+5. Optionally save these settings as a preset; switch looks by choosing another `.cube`.
 
 ### Scope
 
@@ -92,6 +103,7 @@ Because *f* is per-pixel, it can be evaluated in advance on a regular grid over 
 
 - **Capture One:** the A2B0 table of an input ICC profile, 65³ grid, with a square-root shaper curve to sample the shadows more densely.
 - **Camera Raw:** the RGBTable of an XMP profile, 64³ grid.
+- **DxO PhotoLab:** a 64³ `.cube` LUT, read in ProPhoto RGB (gamma 1.8).
 
 Interpolation error on the test photo is about 0.2–0.5 (8-bit units).
 
@@ -112,12 +124,20 @@ Results:
 | Processing after the profile | None (square probe error 0.04, luma probe error 0.02) | None (the RGBTable is the last step) |
 | Model residual on the chart | ≈ 0.2 | mean 0.04, max 0.37 |
 
+DxO PhotoLab (base DCP `SonyA7M5 Linear Base v2`, DCP Curve = Adobe, LUT in ProPhoto RGB):
+
+- **Mid-tones:** the LUT input is the white-balanced camera RGB through the base DCP's matrix, linear, with 1.0 at Sony linear 6422 (the same scale as Camera Raw).
+- **Highlights:** from about 1.7 stops below clipping, PhotoLab's highlight recovery compresses the brighter channels, and a further compression follows whose source was not located; it is modelled with a curve measured on the grey ramp.
+- **Saturated colours:** PhotoLab clips negative components in its DxO Wide Gamut working space, which lifts the weak channel of very saturated greens and blues.
+- **After the LUT:** nothing (square probe matches on the grey ramp to 0.03, luma probe 0.33).
+- **Model residual on the chart:** 0.11 below the highlight threshold, 4.6 above it (all in colour patches).
+
 Two further points:
 
 - In Capture One, *E* depends on the selected tone curve, so the profiles are valid only with Linear Response.
 - The Camera Raw base DCP sets its ForwardMatrix to linear ProPhoto → XYZ D50 and its tone curve to identity. Camera Raw's working space then equals white-balanced camera RGB, and Adobe's own colour and tone are not added.
 
-The pipeline is summarised in [docs/pipeline.md](docs/pipeline.md) (final conclusions; the derivations are in its git history), and the host calibrations in [docs/capture_one.md](docs/capture_one.md) and [docs/camera_raw.md](docs/camera_raw.md) (all Chinese).
+The pipeline is summarised in [docs/pipeline.md](docs/pipeline.md) (final conclusions; the derivations are in its git history), and the host calibrations in [docs/capture_one.md](docs/capture_one.md), [docs/camera_raw.md](docs/camera_raw.md) and [docs/dxo.md](docs/dxo.md) (all Chinese).
 
 ## Regenerating the profiles
 
@@ -142,6 +162,12 @@ Build the Camera Raw profiles:
 
 ```bash
 python3 camera_raw/acr_look.py /path/to/A7M5.ARW --write
+```
+
+Build the DxO PhotoLab LUTs (`--eval` also prints the interpolation error on the ARW):
+
+```bash
+python3 dxo/dxo_look.py /path/to/A7M5.ARW --write
 ```
 
 Render previews directly with the look chain:
@@ -174,19 +200,24 @@ An optional Rust core (`rust/sonylook_core`) fuses the pointwise part of the ren
 3. **Camera Raw:**
    - run `acr_profiles.py probes` and install the probe profiles;
    - export the chart with *Probe* (16-bit ProPhoto, lens corrections off), then run `measure_acr_chart.py` and `acr_encoding.py`.
-4. **Photo comparison:** `compare_c1_export.py` / `compare_acr_export.py EXPORT.tif EDIT.tif`. Use `compare_figure.py` for the side-by-side figure.
+4. **DxO PhotoLab:**
+   - run `dxo/dxo_profiles.py probes` for the probe LUTs and `dxo/dxo_profiles.py base2` for the base DCP;
+   - export the chart with *Probe* (16-bit TIFF, ProPhoto RGB, *Preserve color details* off), then run `measure_acr_chart.py`;
+   - the model in `dxo/dxo_model.py` is checked against that measurement.
+5. **Photo comparison:** `compare_c1_export.py` / `compare_acr_export.py EXPORT.tif EDIT.tif`. Use `compare_figure.py` for the side-by-side figure.
 
 ## Repository layout
 
 | Folder | Contents |
 | --- | --- |
-| `profiles/` | Generated profiles: Capture One ICC; Camera Raw DCP and XMP |
+| `profiles/` | Generated profiles: Capture One ICC; Camera Raw DCP and XMP; DxO PhotoLab DCP and `.cube` |
 | `chart/` | Synthetic chart: `SonyChart.ARW` (opens in Capture One and Camera Raw), patch definitions `SonyChart.json`, preview image |
 | `sonylook/` | Python port of Sony's look chain and front end, ARW and Edit readers. Also ports of RawNR, DRO, sharpening / Spica, Marble, lens geometry correction (none used by the profiles) and the BW/SE Effect stage (used), plus the end-to-end decoder `sony_decode.py` |
 | `rust/` | Optional Rust core (`sonylook_core`): fused render bands, GeoCorr, ITP, Marble, SSCS and table builders. See `rust/README.md` |
 | `capture_one/` | Capture One profile generation, synthetic chart, measurement and comparison |
 | `camera_raw/` | Camera Raw table format, DCP read/write, profile generation, measurement and comparison |
-| `docs/` | Research notes in Chinese: pipeline details and the calibration of Capture One and Camera Raw. Evidence files and test exports mentioned there are not included |
+| `dxo/` | DxO PhotoLab model of the LUT input (`dxo_model.py`), probe and base-DCP generation, LUT generation |
+| `docs/` | Research notes in Chinese: pipeline details and the calibration of Capture One, Camera Raw and DxO PhotoLab. Evidence files and test exports mentioned there are not included |
 
 ## Synthetic chart
 
@@ -201,9 +232,10 @@ An optional Rust core (`rust/sonylook_core`) fuses the pointwise part of the ren
 
 ## Notes
 
-- This project is not affiliated with Sony, Capture One or Adobe. All names and trademarks belong to their owners.
+- This project is not affiliated with Sony, Capture One, Adobe or DxO. All names and trademarks belong to their owners.
 - The project achieves interoperability by analysing software behaviour. The repository contains no binaries, decompiled code or data extracted from that software. The constants it needs are read on the user's machine from the user's own installation.
-- The ColorMatrix values in the Camera Raw profiles come from Adobe Standard's A7M5 profile, so that Camera Raw's white balance behaves unchanged.
+- The ColorMatrix values in the Camera Raw profiles come from Adobe Standard's A7M5 profile, so that Camera Raw's white balance behaves unchanged. The DxO base DCP uses Adobe Standard's ColorMatrix and D65 ForwardMatrix for the same reason.
+- `dxo/dxo_model.py` re-implements PhotoLab's highlight recovery from its observed behaviour and contains a few values measured from PhotoLab while it runs (the DxO Wide Gamut matrices, the highlight white level); it contains no DxO code or files.
 
 ## License
 
