@@ -5,7 +5,7 @@ Setup: base DCP 'SonyA7M5 Linear Base v2' (no BaselineExposureOffset), DCP Curve
 LUT Color Space = ProPhoto RGB.  The LUT input is ProPhoto encoded with gamma 1.8.
 
     lin_sony (white-balanced camera RGB, Sony scale)
-      -> highlight recovery (only when max channel > 0.25*s3*K_G, i.e. lin ~3045):
+      -> highlight recovery (only when max channel > 0.25*s3*K_G, i.e. lin ~4092 at s3 = 31742):
            x = (512 + lin/K) * W/s3,  b = x*gain,  a = 0.75*max(x),  c = W*max(gain)
            out = b if b < a else min(a + (b-a)(W-a) / ((c-W)(b-a)/(c-a) + W - a), b)
            lin' = (out*s3/W / gain - 512) * K
@@ -31,7 +31,11 @@ W = 32767.0
 BLACK = 512.0
 K = np.array([1.33545, 0.515625, 0.712891])          # raw - black -> lin_sony
 GAIN = np.array([2.5898416, 1.0, 1.38281214])         # WB gains seen by the kernel (= K / K_G)
-S3 = 23623.0                                          # InputParameters["WhiteLevel"] with highlights
+# InputParameters["WhiteLevel"], estimated per image: the darkest flat near-clipped plateau, else the
+# sensor saturation 2*(16383-512) = 31742.  Ordinary photos fall back to 31742 (DSC03591: highlight
+# bias R +2.05 -> +0.37 vs 23623); the chart exports used 23623, so set S3 = S3_CHART to reproduce them.
+S3 = 31742.0
+S3_CHART = 23623.0
 SCALE = 6422.0
 A = np.array([[0.533722, 0.278641, 0.187637],
               [0.131256, 0.867798, 0.000946],
