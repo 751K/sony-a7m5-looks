@@ -70,6 +70,21 @@ Sony 创意外观可以视为一个从**白平衡后的相机原生 RGB** 到**�
 相机 RGB ──E（目标软件的输入编码）──▶ 配置文件：f ∘ E⁻¹ ──▶ 输出颜色 = f(相机 RGB)
 ```
 
+下图展示 *f* 对颜色做了什么。左边是相机在日光下能从物体表面拍到的全部颜色，即物体色立体的边界（D65 下反射率 0–1 的所有表面），用已白平衡的线性相机 RGB 表示，1 为漫反射白。这些是现实中最鲜艳的物体颜色。其余几幅是这些点经过不同映射后的位置，统一画在 ProPhoto RGB 坐标里；这个空间足够宽，几乎能装下所有真实颜色。Edit 可以按 sRGB 或 Adobe RGB 导出外观，两者并不相同：Adobe RGB 模式在 LinearMatrix16 之后就乘上 sRGB → Adobe RGB 矩阵，后面的阶段都在更宽的原色上运行。每个点都用自己的输出颜色画出，圆圈是 18% 灰。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/color_cube_zh_dark.png">
+  <img alt="相机 RGB 立方体经 RAW 中性显影、Sony ST、Sony FL2 映射后的分布" src="images/color_cube_zh_light.png">
+</picture>
+
+- **RAW 中性显影**（相机矩阵转到 ProPhoto RGB，没有色调曲线）：色立体基本保持原形，没有压缩。平均彩度 C* 80。
+- **ST**：高光向白点收拢。sRGB 输出时所有颜色都被收进 sRGB 那块窄楔形里（平均彩度 55）；Adobe RGB 输出时有 30% 的颜色留在 sRGB 以外，主要是黄、绿、青（平均彩度 59）。两种模式的中灰相同。
+- **FL2**：本身就大幅往灰轴收，所以输出空间影响不大：Adobe RGB 模式下只有 4% 的颜色超出 sRGB，平均彩度 37 对 38。黑点抬到 0.03（约 8/255），中灰从 0.463 提亮到 0.588。
+
+本仓库的配置文件复现的是 **sRGB** 输出。
+
+图由 `images/make_color_cube.py` 从 DSC03591 的外观参数生成。ARW 里没有传感器的光谱响应，所以用相机的色彩矩阵代替。
+
 ### 1. 外观映射 *f* 的复现
 
 本项目对 Imaging Edge Edit 4.0 进行了静态分析，确定外观链由以下逐像素阶段依次构成：

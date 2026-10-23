@@ -54,7 +54,7 @@ RawNR → ITP → [DRO/Vatr] → [GeoCorr] → SSCS
 | GeoCorr | look+0x12c0 ≠ 0（有 0x7982 表），且畸变开关为开（`FUN_1000aed68`） |
 | SSCS | 无条件 |
 | LinearMatrix16 | 有 0x780f（look+0x1c2 ≠ 0）；否则用旧的 0x7800 矩阵 |
-| AreaComp | 格式码 > 0x33ff，`&0xf000 == 0x3000`，≠ 0x3fff，且有 0x780f |
+| AreaComp | 格式码 ≥ 0x3233，`&0xf000 == 0x3000`，≠ 0x3fff（`0x1000b7b20`）。参数：格式码 > 0x33ff 且有 0x780f 时用新参数，否则用旧参数（`FUN_1000b3db8`，旗标 0） |
 | 3DLut | dev+0x248（0x8026）≠ 0 |
 | HueSaturation | dev+0x204 或 dev+0x1fc ≠ 0 |
 | Spica | `srsettings0000.tbl` 能加载（在 Edit.app/Contents/Resources 中） |
