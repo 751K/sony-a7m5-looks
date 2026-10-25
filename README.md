@@ -6,21 +6,26 @@ Camera Raw still has no profiles for the A7M5's Creative Looks. This repository 
 
 The profiles reproduce the look's colour and tone. Compared with Edit, the remaining chroma difference is below what the eye can see.
 
+Video walkthrough (in Chinese): [Bilibili](https://www.bilibili.com/video/BV1VUH56pECK/)
+
 ![Edit / Capture One / Camera Raw comparison](images/compare_ST.jpg)
 
 ## Results
 
-Each profile was rendered from the same ARW and compared with Edit's export of that look. Test image DSC03591; the images were registered, reduced 8×, and compared as mean absolute error in 8-bit units.
+Each profile was rendered from the same ARW and compared with Edit's export of that look. Test image DSC03591; the images were registered, reduced 8×, and compared as mean absolute error in 8-bit units. The reference column is the complete Edit pipeline ported in this repository (`sonylook/sony_decode.py`: demosaicing, lens correction, sharpening and Spica, Marble), so unlike the profiles it also contains the spatial processing.
 
-| Look | Capture One | Camera Raw | Reference: look chain itself |
+| Look | Capture One | Camera Raw | Reference: full Edit chain |
 | --- | --- | --- | --- |
-| ST | 1.17 | 1.27 | 0.90 |
-| FL2 | 1.05 | 1.15 | 0.89 |
-| FL3 | 1.21 | 1.27 | 1.00 |
+| ST | 1.17 | 1.27 | 0.08 |
+| FL2 | 1.05 | 1.15 | 0.08 |
+| FL3 | 1.21 | 1.27 | 0.09 |
 
-- **Flat areas:** ΔE₀₀ ≈ 0.5.
-- **Global colour shift:** ΔE₀₀ < 0.4, with chroma difference ΔC* of −0.28 in Capture One and −0.01 in Camera Raw. Neither is visible.
-- **Edges and fine texture:** the remaining differences are here. They come from each program's own demosaicing and sharpening, not from the look.
+*The Capture One and Camera Raw columns are exports from 2026-10-16, made before SSCS entered the profiles in v1.1.0; the SSCS bullet below measures that change.*
+
+- **Colour and tone:** the full chain matches Edit to ΔE₀₀ 0.02–0.03 in flat areas and 0.04–0.05 on texture. The look mapping and the stages around it are essentially exact.
+- **Flat areas:** the host exports differ from Edit by ΔE₀₀ ≈ 0.5 for ST (both hosts) and 0.6–0.9 for FL2/FL3 in Camera Raw. That error is the profiles' interpolation plus the hosts' own rendering, not the look mapping.
+- **Global colour shift:** over flat areas the mean Lab difference in Camera Raw is ΔE₀₀ 0.25–0.79 across the three looks, with chroma difference ΔC* of +0.00 / +0.09 / +0.11 (ST / FL2 / FL3). In Capture One (ST) the chroma difference is ≈ −0.20. None is visible.
+- **Edges and fine texture:** this is where the host difference sits. In Camera Raw the error is 0.6–0.9 in flat areas and 5.6–6.1 in textured ones; the full chain stays at ~0.1 in the same textured areas. It comes from each program's own demosaicing and sharpening, not from the look.
 - **Synthetic chart:** profile vs. Sony look target is 0.10–0.15 for Capture One and 0.14 for Camera Raw (64³ table).
 - **Bright, saturated colours (v1.1.0):** the profiles now include Sony's SSCS stage, which pulls bright, saturated colours towards their luma. On the ~5% of DSC03591 that it touches, ST's colour error against Edit drops from 0.64 to 0.16 in Capture One and from 0.61 to 0.33 in Camera Raw.
 - **DxO PhotoLab (v1.2.0):** an ST export of DSC03591 from PhotoLab 10.1 (base DCP + look LUT, as-shot white balance) matches the look chain rendered with the same white balance to 1.18, with a mean colour shift of 0.25–0.67 per channel. It has not yet been compared with an Edit export. Up to about 1.7 stops below clipping PhotoLab passes colours through linearly (chart error 0.11); above that its own highlight handling takes over, and colour patches there differ by 4.6 on average (26 at most).
