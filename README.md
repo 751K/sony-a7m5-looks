@@ -46,6 +46,8 @@ Each profile was rendered from the same ARW and compared with Edit's export of t
 3. Restart Photoshop / Lightroom and pick a look from the **Sony A7M5** group in the profile browser.
 4. To match Sony's rendering exactly, turn off *Use Profile Corrections*. Adobe's lens profile also corrects vignetting, which Edit does not, so with it on the corners come out 20–27% brighter.
 
+> ⚠️ Compatibility note: some Photoshop / Lightroom versions may not load these profiles correctly (for example, missing profiles or incorrect rendering). If that happens, update to a newer version, or regenerate version-specific profiles with the **Recalibration (for new software versions)** steps below.
+
 On Windows the folders are `%APPDATA%\Adobe\CameraRaw\CameraProfiles` and `%APPDATA%\Adobe\CameraRaw\Settings` (untested).
 
 ### DxO PhotoLab

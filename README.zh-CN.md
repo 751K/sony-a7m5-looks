@@ -44,6 +44,8 @@
 2. 把 `profiles/camera_raw/SonyA7M5 Look *.xmp` 复制到 `~/Library/Application Support/Adobe/CameraRaw/Settings/`。
 3. 重启 Photoshop / Lightroom，在配置文件浏览器的 **Sony A7M5** 组里选择外观。
 
+> ⚠️ 兼容性提示：部分 Photoshop / Lightroom 版本可能无法正确加载这些配置（例如配置文件不显示或效果异常）。如果遇到兼容问题，建议更新到较新版本，或按下文“重新标定（换软件版本时）”重新生成对应版本的配置。
+
 ### DxO PhotoLab
 
 需要 **Elite** 版 PhotoLab（*LUT Grading* 面板只在 Elite 版提供），已在 macOS 的 PhotoLab 10.1 上测试。PhotoLab 以路径引用 DCP 和 LUT 文件，请把它们放在一个固定、不会被清理的文件夹里。
